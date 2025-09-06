@@ -24,7 +24,7 @@ export async function PUT(
       params.id,
       {
         isAccepted: true,
-        status: 'approved',
+        status: 'confirmed',
         isConfirmed: true,
       },
       { new: true }

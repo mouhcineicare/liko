@@ -9,6 +9,7 @@ import { triggerPaymentConfirmationEmail } from "@/lib/services/email-triggers";
 import Subscription from "@/lib/db/models/Subscription";
 import Balance from "@/lib/db/models/Balance";
 import Plan from "@/lib/db/models/Plan";
+import { subscriptionTopupBalance } from "@/lib/api/balance";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -77,6 +78,12 @@ export async function POST(req: Request) {
       case "invoice.payment_succeeded":
         await handleSubscriptionPayment(event);
         break;
+      case "customer.subscription.created":
+        await handleSubscriptionCreated(event);
+        break;
+      case "customer.subscription.updated":
+        await handleSubscriptionUpdated(event);
+        break;
       case "customer.subscription.deleted":
         await handleSubscriptionCancellation(event);
         break;
@@ -99,6 +106,8 @@ export async function POST(req: Request) {
 
 
 async function handleSubscriptionPayment(event: Stripe.Event) {
+  console.log('=== WEBHOOK: handleSubscriptionPayment START ===');
+  
   const invoice = event.data.object as Stripe.Invoice & {
     subscription: string;
   };
@@ -108,6 +117,8 @@ async function handleSubscriptionPayment(event: Stripe.Event) {
   if (!subscriptionId) {
     throw new Error('No subscription found on invoice');
   }
+
+  console.log('Processing subscription payment for subscription ID:', subscriptionId);
 
   // Retrieve the full subscription object with proper typing
   const subscription = await stripe.subscriptions.retrieve(subscriptionId) as unknown as Stripe.Subscription & {
@@ -129,6 +140,9 @@ async function handleSubscriptionPayment(event: Stripe.Event) {
     throw new Error('Missing user or plan ID in subscription metadata');
   }
 
+  console.log('Subscription metadata:', { userId, planId });
+
+  // Update subscription record
   await Subscription.findOneAndUpdate(
     { stripeSubscriptionId: subscription.id },
     {
@@ -144,6 +158,95 @@ async function handleSubscriptionPayment(event: Stripe.Event) {
   );
 
   console.log(`Updated subscription ${subscription.id} for user ${userId}`);
+
+  // ADD THIS: Update balance with sessions
+  try {
+    console.log('Adding sessions to balance for subscription:', subscriptionId);
+    await subscriptionTopupBalance(subscriptionId);
+    console.log(`Balance updated successfully for subscription ${subscriptionId}`);
+  } catch (error) {
+    console.error('Failed to update balance for subscription:', error);
+    // Don't throw error - subscription record is already updated
+    // This ensures the subscription is tracked even if balance update fails
+  }
+
+  console.log('=== WEBHOOK: handleSubscriptionPayment END ===');
+}
+
+async function handleSubscriptionCreated(event: Stripe.Event) {
+  console.log('=== WEBHOOK: handleSubscriptionCreated START ===');
+  
+  const subscription = event.data.object as Stripe.Subscription;
+  const userId = subscription.metadata?.userId;
+  const planId = subscription.metadata?.planId;
+
+  if (!userId || !planId) {
+    console.error('Missing user or plan ID in subscription metadata');
+    return;
+  }
+
+  console.log('Creating subscription record for:', { userId, planId, subscriptionId: subscription.id });
+
+  try {
+    // Create subscription record
+    await Subscription.findOneAndUpdate(
+      { stripeSubscriptionId: subscription.id },
+      {
+        user: new mongoose.Types.ObjectId(userId),
+        plan: new mongoose.Types.ObjectId(planId),
+        status: subscription.status,
+        currentPeriodStart: new Date(subscription.current_period_start * 1000),
+        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+        cancelAtPeriodEnd: subscription.cancel_at_period_end || false,
+        price: subscription.items.data[0].price.unit_amount / 100,
+      },
+      { upsert: true, new: true }
+    );
+
+    console.log(`Created subscription record for ${subscription.id}`);
+  } catch (error) {
+    console.error('Error creating subscription record:', error);
+  }
+
+  console.log('=== WEBHOOK: handleSubscriptionCreated END ===');
+}
+
+async function handleSubscriptionUpdated(event: Stripe.Event) {
+  console.log('=== WEBHOOK: handleSubscriptionUpdated START ===');
+  
+  const subscription = event.data.object as Stripe.Subscription;
+  const userId = subscription.metadata?.userId;
+  const planId = subscription.metadata?.planId;
+
+  if (!userId || !planId) {
+    console.error('Missing user or plan ID in subscription metadata');
+    return;
+  }
+
+  console.log('Updating subscription record for:', { userId, planId, subscriptionId: subscription.id });
+
+  try {
+    // Update subscription record
+    await Subscription.findOneAndUpdate(
+      { stripeSubscriptionId: subscription.id },
+      {
+        user: new mongoose.Types.ObjectId(userId),
+        plan: new mongoose.Types.ObjectId(planId),
+        status: subscription.status,
+        currentPeriodStart: new Date(subscription.current_period_start * 1000),
+        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+        cancelAtPeriodEnd: subscription.cancel_at_period_end || false,
+        price: subscription.items.data[0].price.unit_amount / 100,
+      },
+      { upsert: true, new: true }
+    );
+
+    console.log(`Updated subscription record for ${subscription.id}`);
+  } catch (error) {
+    console.error('Error updating subscription record:', error);
+  }
+
+  console.log('=== WEBHOOK: handleSubscriptionUpdated END ===');
 }
 
 async function handleSubscriptionCancellation(event: Stripe.Event) {

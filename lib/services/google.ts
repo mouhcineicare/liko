@@ -196,7 +196,7 @@ export async function handleAppointmentStatusChange(appointment: any, newStatus:
       await syncAppointmentWithCalendar(appointment, therapist);
 
       // Update appointment status
-      appointment.status = "approved";
+      appointment.status = "confirmed";
       await appointment.save();
     }
     // Remove calendar event if appointment is cancelled or no-show

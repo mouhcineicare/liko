@@ -36,6 +36,7 @@ interface RescheduleDialogProps {
     date: string;
     packageName: string;
   };
+  isInitialScheduling?: boolean; // New prop to distinguish initial scheduling from rescheduling
 }
 
 interface TimeSlot {
@@ -51,7 +52,8 @@ export default function RescheduleDialog({
   appointment,
   onSuccess,
   sessionToBeReduced,
-  sessionInfo
+  sessionInfo,
+  isInitialScheduling = false
 }: RescheduleDialogProps) {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState<string>("");
@@ -253,30 +255,49 @@ const performReschedule = async () => {
     // Convert to UTC ISO string without modifying the time
     const utcDate = new Date(newDate.toISOString());
 
-    const response = await fetch("/api/patient/appointments/reschedule", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        appointmentId: appointment._id,
-        newDate: utcDate.toISOString(),
-        sessionToBeReduced,
-        localTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        sessionIndex: sessionInfo?.index
-      }),
-    });
+    let response;
+    let successMessage;
+
+    if (isInitialScheduling) {
+      // For initial scheduling, update the appointment date and status
+      response = await fetch("/api/patient/appointments/schedule", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appointmentId: appointment._id,
+          newDate: utcDate.toISOString(),
+          localTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        }),
+      });
+      successMessage = "Appointment scheduled successfully";
+    } else {
+      // For rescheduling, use the existing reschedule endpoint
+      response = await fetch("/api/patient/appointments/reschedule", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appointmentId: appointment._id,
+          newDate: utcDate.toISOString(),
+          sessionToBeReduced,
+          localTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          sessionIndex: sessionInfo?.index
+        }),
+      });
+      successMessage = "Appointment rescheduled successfully";
+    }
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(errorData.error || "Failed to reschedule appointment");
+      throw new Error(errorData.error || `Failed to ${isInitialScheduling ? 'schedule' : 'reschedule'} appointment`);
     }
 
     const data = await response.json();
-    toast.success("Appointment rescheduled successfully");
+    toast.success(successMessage);
     onSuccess();
     onOpenChange(false);
   } catch (error: any) {
-    console.error("Error rescheduling appointment:", error);
-    toast.error(error.message || "Failed to reschedule appointment");
+    console.error(`Error ${isInitialScheduling ? 'scheduling' : 'rescheduling'} appointment:`, error);
+    toast.error(error.message || `Failed to ${isInitialScheduling ? 'schedule' : 'reschedule'} appointment`);
   } finally {
     setIsLoading(false);
   }
@@ -458,7 +479,7 @@ const performReschedule = async () => {
 
   return (
     <Modal
-      title="Reschedule Appointment"
+      title={isInitialScheduling ? "Schedule Your Appointment" : "Reschedule Appointment"}
       open={open}
       onCancel={handleModalClose}
       footer={[

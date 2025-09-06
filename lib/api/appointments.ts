@@ -29,7 +29,7 @@ export async function getPatientAppointments(patientId: string) {
         { 
           isAccepted: true, 
           isConfirmed: true,
-          status: { $in: ['approved', 'confirmed', 'rescheduled'] }
+          status: { $in: ['confirmed', 'rescheduled'] }
         },
         {
           status: 'rescheduled',

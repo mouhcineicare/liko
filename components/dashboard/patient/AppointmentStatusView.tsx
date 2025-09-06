@@ -751,6 +751,31 @@ const AppointmentStatusView = () => {
                     </div>
                   </div>
 
+                  {/* Time Scheduling for Pending Scheduling Status */}
+                  {appointment.customStatus === 'pending_scheduling' && appointment.therapist && (
+                    <div className="mb-4 pt-3 border-t border-gray-200">
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Calendar className="w-5 h-5 text-yellow-600" />
+                          <h5 className="font-medium text-yellow-800">Schedule Your Appointment</h5>
+                        </div>
+                        <p className="text-sm text-yellow-700 mb-3">
+                          Your therapist has accepted your appointment. Please select a convenient time for your session.
+                        </p>
+                        <Button
+                          onClick={() => {
+                            setSelectedAppointment(appointment);
+                            setShowRescheduleDialog(true);
+                          }}
+                          className="bg-yellow-600 hover:bg-yellow-700 text-white"
+                        >
+                          <Calendar className="w-4 h-4 mr-2" />
+                          Choose Time
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Meeting Link - Only for confirmed and upcoming appointments */}
                   {appointment.meetingLink && 
                    (appointment.status === 'confirmed' || 
@@ -938,6 +963,7 @@ const AppointmentStatusView = () => {
             packageName: selectedAppointment.plan
           } : undefined}
     onSuccess={handleRescheduleSuccess}
+    isInitialScheduling={selectedAppointment.customStatus === 'pending_scheduling'}
   />
 )}
 
