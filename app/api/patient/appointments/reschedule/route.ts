@@ -62,10 +62,10 @@ export async function PUT(req: Request) {
        planType: appointment.planType,
        price: isSameDayReschedule ? (appointment.price + (surchargeAmount || 0)) : appointment.price,
        therapyType: appointment.therapyType,
-       status: isSameDayReschedule ? "matched_pending_therapist_acceptance" : "rescheduled",
+       status: "confirmed", // Always keep as confirmed since therapist has already accepted
        paymentStatus: isSameDayReschedule ? "pending" : "completed",
        isStripeVerified: isSameDayReschedule ? false : true, // Same-day reschedule needs payment verification
-       isConfirmed: isSameDayReschedule ? false : true,
+       isConfirmed: true, // Always keep as confirmed since therapist has already accepted
        hasPreferedDate: false,
        localTimeZone: localTimeZone || appointment.patient?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone,
        totalSessions: sessionToBeReduced ? Math.max(1, appointment.totalSessions - 1) : appointment.totalSessions,
