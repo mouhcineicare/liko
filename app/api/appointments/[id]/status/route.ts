@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import connectDB from "@/lib/db/connect";
 import Appointment from "@/lib/db/models/Appointment";
 import User from "@/lib/db/models/User";
-import { handleAppointmentStatusChange } from "@/lib/services/google";
-import { triggerAppointmentApprovalEmail, triggerAppointmentStatusEmail } from "@/lib/services/email-triggers";
+import { updateAppointmentStatus } from "@/lib/services/appointments/legacy-wrapper";
+import { APPOINTMENT_STATUSES } from "@/lib/utils/statusMapping";
 
 export async function PUT(
   req: Request,
@@ -14,6 +14,8 @@ export async function PUT(
     const appointmentId = params.id;
 
     await connectDB();
+    
+    // Get appointment for validation
     const appointment = await Appointment.findById(appointmentId)
       .populate("patient", "fullName email")
       .populate("therapist", "fullName email googleRefreshToken");
@@ -25,41 +27,64 @@ export async function PUT(
       );
     }
 
-    // Update status
+    // Handle payment status updates separately (not a status transition)
+    if (paymentStatus) {
+      appointment.paymentStatus = paymentStatus;
+      await appointment.save();
+    }
+
+    // Handle status transitions using new system
     if (status) {
-      
-      // If status is completed, increment therapist's completed sessions
-      if (status === 'completed' && appointment.therapist) {
-        appointment.isConfirmed = true;
-        const therapist = await User.findById(appointment.therapist._id);
+      // Map legacy statuses to new ones
+      let newStatus = status;
+      if (status === 'rejected') {
+        newStatus = APPOINTMENT_STATUSES.CANCELLED;
+      } else if (status === 'approved') {
+        newStatus = APPOINTMENT_STATUSES.CONFIRMED;
+      }
+
+      // Determine actor (default to admin for this route)
+      const actor = { id: 'system', role: 'admin' as const };
+
+      // Use new transition system
+      const updatedAppointment = await updateAppointmentStatus(
+        appointmentId,
+        newStatus,
+        actor,
+        { 
+          reason: status === 'rejected' ? `Rejected: ${declineComment || 'No reason provided'}` : `Status updated to ${status}`,
+          meta: { 
+            originalStatus: status,
+            declineComment,
+            paymentStatus 
+          }
+        }
+      );
+
+      // Handle special business logic for completed appointments
+      if (status === 'completed' && updatedAppointment.therapist) {
+        updatedAppointment.isConfirmed = true;
+        const therapist = await User.findById(updatedAppointment.therapist._id);
         if (therapist) {
           therapist.completedSessions += 1;
           await therapist.save();
         }
+        await updatedAppointment.save();
       }
 
-      // If status is rejected, store decline comment
-      if (status === 'rejected' && declineComment && appointment.therapist) {
-        appointment.declineComment = declineComment;
-        const oldTherapeist = appointment.oldTherapies?.length || 0;
-        appointment.oldTherapies = (appointment.oldTherapies && oldTherapeist > 0 )? [...appointment.oldTherapies, appointment.therapist._id.toString()]: [appointment.therapist._id.toString()]
-        appointment.therapist = null;
+      // Handle rejection logic
+      if (status === 'rejected' && declineComment && updatedAppointment.therapist) {
+        updatedAppointment.declineComment = declineComment;
+        const oldTherapist = updatedAppointment.oldTherapies?.length || 0;
+        updatedAppointment.oldTherapies = (updatedAppointment.oldTherapies && oldTherapist > 0) 
+          ? [...updatedAppointment.oldTherapies, updatedAppointment.therapist._id.toString()]
+          : [updatedAppointment.therapist._id.toString()];
+        updatedAppointment.therapist = null;
+        await updatedAppointment.save();
       }
 
-      // Handle calendar sync and meeting link
-      await handleAppointmentStatusChange(appointment, status);
+      return NextResponse.json(updatedAppointment);
     }
-
-    // Update payment status if provided
-    if (paymentStatus) {
-      appointment.paymentStatus = paymentStatus;
-    }
-
-    appointment.status = status;
-
-    await appointment.save();
-
-    await triggerAppointmentStatusEmail(appointment, status);
 
     return NextResponse.json(appointment);
   } catch (error) {

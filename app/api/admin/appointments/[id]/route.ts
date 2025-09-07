@@ -5,6 +5,8 @@ import connectDB from "@/lib/db/connect"
 import Appointment from "@/lib/db/models/Appointment"
 import PatientOnboarding from "@/lib/db/models/PatientOnboarding"
 import User from "@/lib/db/models/User"
+import { updateAppointmentStatus } from "@/lib/services/appointments/legacy-wrapper"
+import { APPOINTMENT_STATUSES } from "@/lib/utils/statusMapping"
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
@@ -222,7 +224,6 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     // Prepare update data - now including the main date
     const updateData: any = {
       date: new Date(date), // Use the provided main date
-      status,
       paymentStatus: finalPaymentStatus,
       patient,
       plan,
@@ -236,7 +237,6 @@ export async function PUT(request: Request, { params }: { params: { id: string }
     // Handle sessions
     if (isSingleSession) {
       updateData.recurring = [];
-      updateData.status = status;
       
       if (status === "completed") {
         updateData.completedSessions = 1;
@@ -271,6 +271,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
       }
     }
 
+    // Update appointment data first (without status)
     const updatedAppointment = await Appointment.findByIdAndUpdate(
       id,
       updateData,
@@ -279,6 +280,40 @@ export async function PUT(request: Request, { params }: { params: { id: string }
 
     if (!updatedAppointment) {
       return NextResponse.json({ error: "Failed to update appointment" }, { status: 500 });
+    }
+
+    // Handle status transition using new system
+    if (status && status !== existingAppointment.status) {
+      // Map legacy statuses to new ones
+      let newStatus = status;
+      if (status === 'approved') {
+        newStatus = APPOINTMENT_STATUSES.CONFIRMED;
+      } else if (status === 'rejected') {
+        newStatus = APPOINTMENT_STATUSES.CANCELLED;
+      } else if (status === 'in_progress') {
+        newStatus = APPOINTMENT_STATUSES.CONFIRMED;
+      }
+
+      const actor = { id: session.user.id, role: 'admin' as const };
+      
+      const finalAppointment = await updateAppointmentStatus(
+        id,
+        newStatus,
+        actor,
+        { 
+          reason: `Admin updated appointment status to ${status}`,
+          meta: { 
+            originalStatus: status,
+            adminUpdate: true,
+            updateData: Object.keys(updateData)
+          }
+        }
+      );
+
+      return NextResponse.json({
+        message: "Appointment updated successfully",
+        appointment: finalAppointment,
+      });
     }
 
     return NextResponse.json({

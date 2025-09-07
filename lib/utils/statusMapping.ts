@@ -249,3 +249,6 @@ export const getStatusConfig = (status: string) => {
     icon: '❓'
   };
 };
+
+// Feature flag for new transition system
+export const USE_NEW_TRANSITION_SYSTEM = process.env.USE_NEW_TRANSITION_SYSTEM === 'true';

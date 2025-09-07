@@ -3,6 +3,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth/config';
 import connectDB from '@/lib/db/connect';
 import Appointment from '@/lib/db/models/Appointment';
+import { updateAppointmentStatus } from '@/lib/services/appointments/legacy-wrapper';
+import { APPOINTMENT_STATUSES } from '@/lib/utils/statusMapping';
 
 export async function PUT(
   request: NextRequest,
@@ -57,28 +59,34 @@ export async function PUT(
       });
     }
 
-    // Create audit trail entry for bank-like security
-    const auditEntry = {
-      fromStatus: appointment.status,
-      toStatus: status,
-      reason: status === 'no-show' ? 'Marked as no-show by therapist' : `Status changed to ${status} by therapist`,
-      timestamp: new Date(),
-      performedBy: session.user.id,
-      performedByRole: 'therapist' as const
-    };
+    // Map legacy statuses to new ones
+    let newStatus = status;
+    if (status === 'upcoming') {
+      newStatus = APPOINTMENT_STATUSES.CONFIRMED;
+    }
 
-    // Update the appointment status with audit trail
-    const updatedAppointment = await Appointment.findByIdAndUpdate(
+    // Determine actor
+    const actor = { id: session.user.id, role: 'therapist' as const };
+
+    // Use new transition system
+    const updatedAppointment = await updateAppointmentStatus(
       appointmentId,
+      newStatus,
+      actor,
       { 
-        status,
-        lastStatusChangeReason: status === 'no-show' ? 'Marked as no-show by therapist' : `Status changed to ${status} by therapist`,
-        lastStatusChangedBy: session.user.id,
-        lastStatusChangedAt: new Date(),
-        $push: { statusTransitionHistory: auditEntry },
-        updatedAt: new Date()
-      },
-      { new: true }
+        reason: status === 'no-show' ? 'Marked as no-show by therapist' : `Status changed to ${status} by therapist`,
+        meta: { 
+          originalStatus: status,
+          therapistValidated: appointment.therapistValidated,
+          legacyAudit: {
+            fromStatus: appointment.status,
+            toStatus: status,
+            timestamp: new Date(),
+            performedBy: session.user.id,
+            performedByRole: 'therapist'
+          }
+        }
+      }
     );
 
     return NextResponse.json({
