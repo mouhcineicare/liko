@@ -5,10 +5,7 @@ export interface SessionHistoryItem {
   _id?: string;
   action: "added" | "removed" | "used";
   sessions: number;
-  plan?: {
-    _id: string;
-    title: string;
-  };
+  plan?: string; // Changed to string to match schema and existing data
   admin?: {
     _id: string;
     fullName: string;
@@ -87,7 +84,7 @@ const balanceSchema = new mongoose.Schema({
       required: true
     },
     plan: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String, // Changed from ObjectId to String to match existing data
       ref: 'Plan'
     },
     admin: {
@@ -174,6 +171,11 @@ balanceSchema.pre('save', function(next) {
   next();
 });
 
-const Balance = mongoose.models.Balance || mongoose.model('Balance', balanceSchema);
+// Clear any existing model to force recompilation with new schema
+if (mongoose.models.Balance) {
+  delete mongoose.models.Balance;
+}
+
+const Balance = mongoose.model('Balance', balanceSchema);
 
 export default Balance;

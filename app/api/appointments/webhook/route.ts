@@ -478,13 +478,13 @@ async function handleRenewNowPayment(session: Stripe.Checkout.Session) {
     balance.totalSessions += sessionsToAdd;
 
     // Record history
-    balance.history.push({
-      action: 'added',
-      sessions: sessionsToAdd,
-      plan: matchingPlan._id,
-      reason: `Renew Now - ${product.name}`,
-      createdAt: new Date()
-    });
+      balance.history.push({
+        action: 'added',
+        sessions: sessionsToAdd,
+        plan: matchingPlan.title, // Use plan title instead of plan ID
+        reason: `Renew Now - ${product.name}`,
+        createdAt: new Date()
+      });
 
     // Record payment
     balance.payments.push({

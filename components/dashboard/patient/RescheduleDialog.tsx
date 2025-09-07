@@ -150,10 +150,12 @@ export default function RescheduleDialog({
 
   const fetchTherapistAvailability = async () => {
     try {
-      const response = await fetch(`/api/patient/profile/${appointment.therapist._id}`);
+      const response = await fetch(`/api/therapistprofiles/${appointment.therapist._id}`);
       if (!response.ok) throw new Error("Failed to fetch availability");
       const data = await response.json();
-      setAvailableDayNames(data.availableDays || []);
+      // Extract available days from the therapy profile
+      const availableDays = data.data?.availability?.map((avail: any) => avail.day) || [];
+      setAvailableDayNames(availableDays);
     } catch (error) {
       console.error("Error fetching therapist availability:", error);
       throw error;

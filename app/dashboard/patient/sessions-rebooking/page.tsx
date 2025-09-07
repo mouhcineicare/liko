@@ -143,10 +143,12 @@ export default function SessionsRebooking() {
 
   const fetchTherapistAvailableDays = async (therapistId: string) => {
     try {
-      const response = await fetch(`/api/patient/profile/${therapistId}`);
+      const response = await fetch(`/api/therapistprofiles/${therapistId}`);
       if (!response.ok) throw new Error("Failed to fetch therapist availability");
       const data = await response.json();
-      setAvailableDayNames(data.availableDays || []);
+      // Extract available days from the therapy profile
+      const availableDays = data.data?.availability?.map((avail: any) => avail.day) || [];
+      setAvailableDayNames(availableDays);
     } catch (error) {
       console.error("Error fetching therapist availability:", error);
       // Don't throw error, just set empty array

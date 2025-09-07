@@ -421,7 +421,13 @@ const fetchAppointments = useCallback(async (loadMore = false, filterStatus = fi
         body: JSON.stringify({ appointmentId, charge, reduceSession: charge ? 0.5 : 0 }),
       });
 
-      if (!response.ok) throw new Error("Failed to cancel appointment");
+      if (!response.ok) {
+        const errorData = await response.json();
+        const errorMessage = errorData.error || "Failed to cancel appointment";
+        const errorDetails = errorData.details ? ` (${errorData.details})` : "";
+        throw new Error(`${errorMessage}${errorDetails}`);
+      }
+      
       fetchAppointments();
       toast.success("Appointment cancelled successfully");
       
@@ -429,7 +435,8 @@ const fetchAppointments = useCallback(async (loadMore = false, filterStatus = fi
       window.location.reload();
     } catch (error) {
       console.error("Error cancelling appointment:", error);
-      toast.error("Failed to cancel appointment");
+      const errorMessage = error instanceof Error ? error.message : "Failed to cancel appointment";
+      toast.error(errorMessage);
     }
   };
 

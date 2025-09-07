@@ -67,7 +67,7 @@ export async function subscriptionTopupBalance(subscriptionId: string) {
     balance.history.push({
       action: 'added',
       sessions: sessionsToAdd,
-      plan: matchingPlan._id,
+      plan: matchingPlan.title, // Use plan title instead of plan ID
       reason: `Subscription renewal - ${product.name}`,
       createdAt: new Date()
     });

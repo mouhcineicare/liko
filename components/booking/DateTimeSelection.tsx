@@ -153,13 +153,15 @@ export default function DateTimeSelection({
     const fetchAvailability = async () => {
       setIsFetchingDays(true);
       try {
-        const response = await fetch(`/api/patient/profile/${therapistId}`, {
+        const response = await fetch(`/api/therapistprofiles/${therapistId}`, {
           cache: "no-store",
           next: { revalidate: 0 }
         });
         if (!response.ok) throw new Error("Failed to fetch availability");
         const data = await response.json();
-        setAvailableDayNames(data.availableDays || []);
+        // Extract available days from the therapy profile
+        const availableDays = data.data?.availability?.map((avail: any) => avail.day) || [];
+        setAvailableDayNames(availableDays);
       } catch (error: any) {
         toast.error("Failed to load available time slots", error?.message);
       } finally {

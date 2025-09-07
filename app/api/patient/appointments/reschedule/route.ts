@@ -89,13 +89,35 @@ export async function PUT(req: Request) {
       }
     }
 
-    // Create new appointment record
-    const newAppointment = await updateAppointment(appointmentId, appointmentData);
+    // Update appointment data first
+    const updatedAppointment = await updateAppointment(appointmentId, appointmentData);
+
+    // Use new status system for reschedule transition
+    const { updateAppointmentStatus } = await import("@/lib/services/appointments/legacy-wrapper");
+    const { APPOINTMENT_STATUSES } = await import("@/lib/utils/statusMapping");
+
+    // Transition to rescheduled status using new system
+    const actor = { id: session.user.id, role: 'patient' as const };
+    const finalAppointment = await updateAppointmentStatus(
+      appointmentId,
+      APPOINTMENT_STATUSES.RESCHEDULED,
+      actor,
+      { 
+        reason: 'Appointment rescheduled by patient',
+        meta: { 
+          originalDate: appointment.date,
+          newDate: newDate,
+          sessionIndex,
+          isSameDayReschedule,
+          surchargeAmount
+        }
+      }
+    );
 
     // If the therapist has Google Calendar connected, update the calendar event
     if ((appointment.therapist as any)?.googleRefreshToken) {
       try {
-        await syncAppointmentWithCalendar(newAppointment, appointment.therapist);
+        await syncAppointmentWithCalendar(finalAppointment, appointment.therapist);
         await removeCalendarEvent(appointment, appointment.therapist);
       } catch (error) {
         console.error("Error syncing with Google Calendar:", error);
@@ -105,7 +127,7 @@ export async function PUT(req: Request) {
 
     return NextResponse.json({
       message: "Appointment rescheduled successfully",
-      appointment: newAppointment,
+      appointment: finalAppointment,
     });
   } catch (error) {
     console.error("Error rescheduling appointment:", error);

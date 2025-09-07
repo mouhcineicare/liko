@@ -67,8 +67,10 @@ async function handleAppointmentStatusChanged(event: Extract<Event, { type: "App
   // Handle reminder scheduling
   if (to === APPOINTMENT_STATUSES.CONFIRMED) {
     try {
-      const { scheduleAppointmentReminders } = await import("@/lib/services/reminders");
-      await scheduleAppointmentReminders(appointment);
+      // TODO: Implement reminder scheduling service
+      // const { scheduleAppointmentReminders } = await import("@/lib/services/reminders");
+      // await scheduleAppointmentReminders(appointment);
+      console.log("Reminder scheduling would be triggered for appointment:", id);
     } catch (error) {
       console.error("Reminder scheduling failed:", error);
     }
