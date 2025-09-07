@@ -393,6 +393,8 @@ const AppointmentStatusView = () => {
     (!apt.isStripeVerified && !apt.isBalance && apt.paymentStatus !== 'completed')
   );
 
+  // Show banner for all patients - no need to check specific statuses
+
   if (!statusData || allAppointments.length === 0) {
     return (
       <div className="space-y-4">
@@ -403,9 +405,17 @@ const AppointmentStatusView = () => {
             <p className="text-gray-500 mb-4">You don't have any active therapy packages yet.</p>
             <Button onClick={() => setShowBookDialog(true)}>
               Book Your First Session
-      </Button>
+            </Button>
           </div>
         </Card>
+
+        {/* Next Steps Widget - Always show for all patients */}
+        <AppointmentNextStepWidget 
+          appointment={null}
+          onReschedule={() => {}}
+          onCancel={() => {}}
+          onRefresh={fetchStatusData}
+        />
       </div>
     );
   }
@@ -913,21 +923,23 @@ const AppointmentStatusView = () => {
           </div>
         </Card>
 
-        {/* Next Steps Widget - Only show if there's a closest upcoming appointment */}
-        {currentAppointment && (
-          <AppointmentNextStepWidget 
-            appointment={currentAppointment}
-            onReschedule={() => {
+        {/* Next Steps Widget - Always show for all patients */}
+        <AppointmentNextStepWidget 
+          appointment={currentAppointment}
+          onReschedule={() => {
+            if (currentAppointment) {
               setSelectedAppointment(currentAppointment);
               setShowRescheduleDialog(true);
-            }}
-            onCancel={() => {
+            }
+          }}
+          onCancel={() => {
+            if (currentAppointment) {
               setSelectedAppointment(currentAppointment);
               setShowCancellationDialog(true);
-            }}
-            onRefresh={fetchStatusData}
-          />
-        )}
+            }
+          }}
+          onRefresh={fetchStatusData}
+        />
       </div>
 
       {/* Book Appointment Modal */}

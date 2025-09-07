@@ -8,7 +8,19 @@ import FeedbackAlert from "./FeedbackAlert";
 import { useRouter } from "next/navigation";
 
 
-export function AppointmentNextStepWidget() {
+interface AppointmentNextStepWidgetProps {
+  appointment?: any;
+  onReschedule?: () => void;
+  onCancel?: () => void;
+  onRefresh?: () => Promise<any>;
+}
+
+export function AppointmentNextStepWidget({ 
+  appointment, 
+  onReschedule, 
+  onCancel, 
+  onRefresh 
+}: AppointmentNextStepWidgetProps) {
     const [isRebooking, setIsRebooking] = useState(false);
     const [isChangingTherapist, setIsChangingTherapist] = useState(false);
     const [isLeavingFeedback, setIsLeavingFeedback] = useState(false);

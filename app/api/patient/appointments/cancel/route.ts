@@ -41,7 +41,7 @@ export async function POST(req: Request) {
     // Log appointment status for debugging
     console.log('Cancel appointment validation:', {
       appointmentId,
-      appointmentDate: appointmentDateUTC.toISOString(),
+          appointmentDate: appointmentDateUTC.toISOString(),
       currentTime: nowUTC.toISOString(),
       isExpired,
       appointmentStatus: appointment.status
@@ -81,19 +81,27 @@ export async function POST(req: Request) {
       console.log('Created new balance for user:', session.user.id)
     }
 
-    // Calculate sessions based on appointment price using 90AED rate
-    const DEFAULT_BALANCE_RATE = 90; // Constant rate used in the system
+    // Calculate sessions to return based on remaining sessions, not price
+    // The appointment.totalSessions represents the sessions that were deducted from balance
+    const remainingSessions = appointment.totalSessions - appointment.completedSessions;
     
     // Determine how many sessions to add based on charge
     let sessionsToAdd;
     if (charge) {
-      // 50% return: (appointment.price / 2) / 90AED
-      const halfPrice = appointment.price / 2;
-      sessionsToAdd = halfPrice / DEFAULT_BALANCE_RATE;
+      // 50% return: return half of the remaining sessions
+      sessionsToAdd = remainingSessions / 2;
     } else {
-      // 100% return: appointment.price / 90AED
-      sessionsToAdd = appointment.price / DEFAULT_BALANCE_RATE;
+      // 100% return: return all remaining sessions
+      sessionsToAdd = remainingSessions;
     }
+    
+    console.log('Session refund calculation:', {
+      totalSessions: appointment.totalSessions,
+      completedSessions: appointment.completedSessions,
+      remainingSessions,
+      charge,
+      sessionsToAdd
+    });
 
     // Add sessions to balance
     balance.totalSessions += sessionsToAdd
@@ -111,8 +119,8 @@ export async function POST(req: Request) {
       sessions: sessionsToAdd,
       plan: appointment.plan, // Use the plan title/name from appointment, not the plan ID
       reason: charge ? 
-        `Appointment cancellation (50% charge applied) - ${appointment.price} AED refunded as ${sessionsToAdd} sessions` :
-        `Appointment cancellation (full sessions returned) - ${appointment.price} AED refunded as ${sessionsToAdd} sessions`,
+        `Appointment cancellation (50% charge applied) - ${remainingSessions} sessions refunded as ${sessionsToAdd} sessions` :
+        `Appointment cancellation (full sessions returned) - ${remainingSessions} sessions refunded as ${sessionsToAdd} sessions`,
       createdAt: new Date()
     };
     
@@ -202,13 +210,13 @@ export async function POST(req: Request) {
         sessionsAdded: sessionsToAdd,
         wasNewBalance: !balance._id // Indicates if this was a newly created balance
       },
-      calculation: {
-        appointmentPrice: appointment.price,
-        sessionRate: DEFAULT_BALANCE_RATE,
-        exactSessionsCalculated: appointment.price / DEFAULT_BALANCE_RATE,
-        chargeApplied: charge,
-        finalSessionsAdded: sessionsToAdd
-      },
+        calculation: {
+          totalSessions: appointment.totalSessions,
+          completedSessions: appointment.completedSessions,
+          remainingSessions: remainingSessions,
+          chargeApplied: charge,
+          finalSessionsAdded: sessionsToAdd
+        },
       timeValidation: {
         currentTimeUTC: nowUTC.toISOString(),
         appointmentTimeUTC: appointmentDateUTC.toISOString(),
