@@ -190,16 +190,39 @@ const AppointmentStatusView = () => {
 
   const handleCancellation = async (appointmentId: string, charge: boolean) => {
     try {
+      // Generate dedupe key for idempotency
+      const dedupeKey = `${appointmentId}:${charge ? 'half' : 'full'}:${Date.now()}`;
+      
       const response = await fetch("/api/patient/appointments/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ appointmentId, charge, reduceSession: charge ? 0.5 : 0 }),
+        body: JSON.stringify({ 
+          appointmentId, 
+          charge, 
+          reduceSession: charge ? 0.5 : 0,
+          dedupeKey 
+        }),
       });
 
       if (!response.ok) {
         const errorData = await response.json();
         const errorMessage = errorData.error || "Failed to cancel appointment";
         const errorDetails = errorData.details ? ` (${errorData.details})` : "";
+        
+        // If appointment is already cancelled, refresh the data and show info message
+        if (errorMessage.includes("already cancelled")) {
+          await refreshStatusData();
+          toast.info("This appointment was already cancelled");
+          return;
+        }
+        
+        // If appointment is completed, refresh the data and show info message
+        if (errorMessage.includes("completed")) {
+          await refreshStatusData();
+          toast.info("This appointment has already been completed");
+          return;
+        }
+        
         throw new Error(`${errorMessage}${errorDetails}`);
       }
       
@@ -823,15 +846,18 @@ const AppointmentStatusView = () => {
                       Reschedule First Session
                     </Button>
                     
-        <Button
-          variant="outline"
-          size="sm"
-                      onClick={() => handlePackageCancellation(appointment)}
-                      className="text-red-600 border-red-200 hover:bg-red-50"
-                    >
-                      <XCircle className="w-4 h-4 mr-1" />
-                      Cancel Package
-        </Button>
+                    {/* Only show cancel button for appointments that can be cancelled */}
+                    {appointment.status !== 'cancelled' && appointment.status !== 'completed' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePackageCancellation(appointment)}
+                        className="text-red-600 border-red-200 hover:bg-red-50"
+                      >
+                        <XCircle className="w-4 h-4 mr-1" />
+                        Cancel Package
+                      </Button>
+                    )}
 
                     {hasRecurringSessions && (
       <Button

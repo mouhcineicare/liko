@@ -150,12 +150,89 @@ export default function PaymentPage() {
             Redirecting to Secure Payment
           </h1>
           <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-            <h3 className="font-medium text-gray-900">Appointment Details</h3>
-            <div className="mt-2 text-sm text-gray-600">
-              <p>Date: {new Date(appointment.date).toLocaleDateString()}</p>
-              <p>Time: {new Date(appointment.date).toLocaleTimeString()}</p>
-              <p>Plan: {appointment.plan}</p>
-              <p className="mt-2 text-lg font-semibold">Amount: د.إ{appointment.price}</p>
+            <h3 className="font-medium text-gray-900">
+              {appointment.recurring && appointment.recurring.length > 0 
+                ? `You're booking a recurring session with the following times:`
+                : `Your booking session on this day`
+              }
+            </h3>
+            
+            {/* Session Details */}
+            <div className="mt-4 space-y-3">
+              {/* Main Session */}
+              <div className="flex items-start gap-3 p-3 bg-white rounded-lg border">
+                <div className="mt-1 w-2 h-2 rounded-full bg-blue-500"></div>
+                <div className="flex-1">
+                  <p className="font-medium text-gray-800">
+                    Session 1 - {new Date(appointment.date).toLocaleDateString('en-US', { 
+                      weekday: 'long', 
+                      year: 'numeric', 
+                      month: 'long', 
+                      day: 'numeric' 
+                    })}
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    at {new Date(appointment.date).toLocaleTimeString('en-US', { 
+                      hour: 'numeric', 
+                      minute: '2-digit',
+                      hour12: true 
+                    })}
+                  </p>
+                </div>
+              </div>
+
+              {/* Recurring Sessions */}
+              {appointment.recurring && appointment.recurring.length > 0 && (
+                <div className="space-y-2 pl-2 border-l-2 border-gray-200">
+                  {appointment.recurring.map((session: any, index: number) => (
+                    <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border">
+                      <div className="mt-1 w-2 h-2 rounded-full bg-gray-400"></div>
+                      <div className="flex-1">
+                        <p className="font-medium text-gray-800">
+                          Session {index + 2} - {new Date(session.date).toLocaleDateString('en-US', { 
+                            weekday: 'long', 
+                            year: 'numeric', 
+                            month: 'long', 
+                            day: 'numeric' 
+                          })}
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          at {new Date(session.date).toLocaleTimeString('en-US', { 
+                            hour: 'numeric', 
+                            minute: '2-digit',
+                            hour12: true 
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Package Summary */}
+            <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="font-medium text-blue-900">Plan: {appointment.plan}</p>
+                  <p className="text-sm text-blue-700">
+                    {appointment.recurring && appointment.recurring.length > 0 
+                      ? `${appointment.recurring.length + 1} Sessions Package`
+                      : '1 Session'
+                    }
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-lg font-semibold text-blue-900">
+                    د.إ{appointment.price}
+                  </p>
+                  {appointment.recurring && appointment.recurring.length > 0 && (
+                    <p className="text-sm text-blue-700">
+                      د.إ{(appointment.price / (appointment.recurring.length + 1)).toFixed(2)} per session
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
           <div className="text-center">

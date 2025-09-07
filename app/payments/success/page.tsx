@@ -107,8 +107,10 @@ export default function PaymentSuccessPage() {
         console.log('Payment already processed by webhook, showing success');
         toast.success("Payment completed successfully!");
         setTimeout(() => {
-          window.location.href = "/dashboard/patient";
-        }, 2000);
+          // Use router.push instead of window.location.href to maintain session
+          router.push("/dashboard/patient");
+          router.refresh(); // Refresh the data
+        }, 3000); // Increased delay to allow webhook processing
         return; // Exit early, don't try to fix
       } else if (result.paymentStatus === 'completed' && !result.isStripeVerified) {
         // Payment marked as completed but not verified by Stripe, try to fix
@@ -142,8 +144,10 @@ export default function PaymentSuccessPage() {
               toast.success("Payment processed successfully!");
             }
             setTimeout(() => {
-              window.location.href = "/dashboard/patient";
-            }, 2000);
+              // Use router.push instead of window.location.href to maintain session
+              router.push("/dashboard/patient");
+              router.refresh(); // Refresh the data
+            }, 3000); // Increased delay to allow webhook processing
           } else {
             toast.success("Payment successful! Please refresh the page to see updated status.");
           }

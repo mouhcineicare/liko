@@ -14,10 +14,26 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const { appointmentId, charge, reduceSession } = await req.json()
+    const { appointmentId, charge, reduceSession, dedupeKey } = await req.json()
 
     if (!appointmentId) {
       return NextResponse.json({ error: "Missing required parameters" }, { status: 400 })
+    }
+
+    // Check for idempotency if dedupeKey is provided
+    if (dedupeKey) {
+      const existingRefund = await Balance.findOne({
+        user: session.user.id,
+        'history.reason': { $regex: `dedupeKey:${dedupeKey}` }
+      });
+      
+      if (existingRefund) {
+        console.log('Refund already processed for dedupeKey:', dedupeKey);
+        return NextResponse.json({ 
+          message: "Refund already processed",
+          dedupeKey 
+        });
+      }
     }
 
     await connectDB()
@@ -31,6 +47,30 @@ export async function POST(req: Request) {
     // Verify the patient owns this appointment
     if (appointment.patient.toString() !== session.user.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    // Check if appointment is already cancelled
+    if (appointment.status === 'cancelled') {
+      return NextResponse.json({ 
+        error: "Appointment is already cancelled",
+        details: {
+          appointmentId,
+          currentStatus: appointment.status,
+          message: "This appointment has already been cancelled and cannot be cancelled again."
+        }
+      }, { status: 400 })
+    }
+
+    // Check if appointment is already completed
+    if (appointment.status === 'completed') {
+      return NextResponse.json({ 
+        error: "Cannot cancel completed appointment",
+        details: {
+          appointmentId,
+          currentStatus: appointment.status,
+          message: "This appointment has already been completed and cannot be cancelled."
+        }
+      }, { status: 400 })
     }
 
     // Check if appointment is expired (for logging purposes)
@@ -81,25 +121,78 @@ export async function POST(req: Request) {
       console.log('Created new balance for user:', session.user.id)
     }
 
-    // Calculate sessions to return based on remaining sessions, not price
-    // The appointment.totalSessions represents the sessions that were deducted from balance
-    const remainingSessions = appointment.totalSessions - appointment.completedSessions;
-    
-    // Determine how many sessions to add based on charge
+    // Use refund calculator for accurate refunds based on payment breakdown
+    let refundResult;
     let sessionsToAdd;
-    if (charge) {
-      // 50% return: return half of the remaining sessions
-      sessionsToAdd = remainingSessions / 2;
+    
+    // Simplified refund calculation (avoiding complex imports for now)
+    const DEFAULT_BALANCE_RATE = 90;
+    
+    // Determine refund policy
+    let refundMultiplier: number;
+    if (reduceSession > 0) {
+      refundMultiplier = reduceSession;
+    } else if (charge) {
+      refundMultiplier = 0.5;
     } else {
-      // 100% return: return all remaining sessions
-      sessionsToAdd = remainingSessions;
+      refundMultiplier = 1.0;
     }
     
+    // Calculate refund based on payment method and stored payment breakdown
+    if (appointment.payment && appointment.payment.method) {
+      // Use stored payment breakdown for accurate refunds
+      const payment = appointment.payment;
+      
+      if (payment.method === 'balance') {
+        // Payment was made with balance - refund based on sessions deducted
+        sessionsToAdd = remainingSessions * refundMultiplier;
+      } else if (payment.method === 'stripe') {
+        // Payment was made with Stripe - refund based on stored session units
+        const remainingUnits = (payment.sessionsPaidWithStripe || 0) - (payment.refundedUnitsFromStripe || 0);
+        sessionsToAdd = remainingUnits * refundMultiplier;
+      } else if (payment.method === 'mixed') {
+        // Mixed payment - refund from both sources
+        const remainingBalanceUnits = (payment.sessionsPaidWithBalance || 0) - (payment.refundedUnitsFromBalance || 0);
+        const remainingStripeUnits = (payment.sessionsPaidWithStripe || 0) - (payment.refundedUnitsFromStripe || 0);
+        const totalRemainingUnits = remainingBalanceUnits + remainingStripeUnits;
+        sessionsToAdd = totalRemainingUnits * refundMultiplier;
+      }
+    } else {
+      // Fallback to legacy calculation for old appointments
+      if (appointment.isBalance) {
+        sessionsToAdd = remainingSessions * refundMultiplier;
+      } else {
+        const perSessionPrice = appointment.price / (appointment.totalSessions || 1);
+        const perSessionPriceInSessions = perSessionPrice / DEFAULT_BALANCE_RATE;
+        sessionsToAdd = perSessionPriceInSessions * refundMultiplier;
+      }
+    }
+    
+    // Round to 2 decimal places to avoid floating point issues
+    sessionsToAdd = Math.round(sessionsToAdd * 100) / 100;
+    
+    refundResult = { 
+      fromBalance: sessionsToAdd, 
+      fromStripe: 0, 
+      moneyRefund: 0, 
+      sessionUnitsRefunded: sessionsToAdd 
+    };
+    
     console.log('Session refund calculation:', {
-      totalSessions: appointment.totalSessions,
-      completedSessions: appointment.completedSessions,
-      remainingSessions,
+      appointmentId,
+      refundMultiplier,
+      refundResult,
+      appointmentData: {
+        sessionCount: appointment.sessionCount || appointment.totalSessions,
+        sessionUnitsTotal: appointment.sessionUnitsTotal || (appointment.price / 90),
+        completedSessions: appointment.completedSessions,
+        payment: appointment.payment,
+        isBalance: appointment.isBalance,
+        price: appointment.price,
+        totalSessions: appointment.totalSessions
+      },
       charge,
+      reduceSession,
       sessionsToAdd
     });
 
@@ -114,13 +207,20 @@ export async function POST(req: Request) {
     }
     
     // Add history record
+    const paymentMethod = appointment.isBalance ? 'balance' : 'stripe';
+    const refundAmount = appointment.isBalance ? 
+      `${remainingSessions} sessions` : 
+      `${appointment.price} AED (${sessionsToAdd} sessions)`;
+    
+    const reason = charge ? 
+      `Appointment cancellation (50% charge applied) - ${refundAmount} refunded as ${sessionsToAdd} sessions (${paymentMethod} payment)` :
+      `Appointment cancellation (full refund) - ${refundAmount} refunded as ${sessionsToAdd} sessions (${paymentMethod} payment)`;
+    
     const historyItem = {
       action: "added",
       sessions: sessionsToAdd,
       plan: appointment.plan, // Use the plan title/name from appointment, not the plan ID
-      reason: charge ? 
-        `Appointment cancellation (50% charge applied) - ${remainingSessions} sessions refunded as ${sessionsToAdd} sessions` :
-        `Appointment cancellation (full sessions returned) - ${remainingSessions} sessions refunded as ${sessionsToAdd} sessions`,
+      reason: dedupeKey ? `${reason} dedupeKey:${dedupeKey}` : reason,
       createdAt: new Date()
     };
     
@@ -130,6 +230,26 @@ export async function POST(req: Request) {
     // Use new status system for cancellation
     const { updateAppointmentStatus } = await import("@/lib/services/appointments/legacy-wrapper");
     const { APPOINTMENT_STATUSES, LEGACY_STATUS_MAPPING } = await import("@/lib/utils/statusMapping");
+
+    // Double-check status before attempting transition (extra safety)
+    if (appointment.status === 'cancelled') {
+      console.log('Appointment already cancelled, skipping status transition');
+      return NextResponse.json({
+        message: "Appointment is already cancelled",
+        appointment: {
+          _id: appointment._id,
+          status: appointment.status,
+          date: appointment.date,
+          price: appointment.price
+        },
+        balance: {
+          totalSessions: balance.totalSessions,
+          remainingSessions: balance.totalSessions - balance.spentSessions,
+          sessionsAdded: 0,
+          wasNewBalance: !balance._id
+        }
+      });
+    }
 
     // Debug: Log current appointment status and mapped status
     console.log('Cancel appointment debug:', {
@@ -147,11 +267,10 @@ export async function POST(req: Request) {
       actor,
       { 
         reason: charge ? 'Appointment cancelled with 50% charge' : 'Appointment cancelled - full refund',
-        meta: { 
+        meta: {
           charge,
           sessionsToAdd,
           appointmentPrice: appointment.price,
-          sessionRate: DEFAULT_BALANCE_RATE,
           originalStatus: appointment.status
         }
       }
@@ -159,6 +278,12 @@ export async function POST(req: Request) {
 
     // Save balance changes using raw MongoDB operations to avoid schema issues
     try {
+      console.log('Attempting to update balance with:', {
+        balanceId: balance._id,
+        sessionsToAdd,
+        historyItem: JSON.stringify(historyItem, null, 2)
+      });
+
       await Balance.findByIdAndUpdate(
         balance._id,
         {
@@ -170,14 +295,14 @@ export async function POST(req: Request) {
       console.log('Balance updated successfully using raw MongoDB operations');
     } catch (updateError) {
       console.error('Error updating balance:', updateError);
-      
+
       // Fallback: try to save the balance document directly (without history)
       try {
         balance.totalSessions += sessionsToAdd;
         balance.updatedAt = new Date();
         await balance.save();
         console.log('Balance saved successfully using Mongoose save (without history)');
-        
+
         // Try to add history separately using raw MongoDB
         try {
           await Balance.findByIdAndUpdate(
@@ -191,7 +316,7 @@ export async function POST(req: Request) {
         }
       } catch (saveError) {
         console.error('Both MongoDB update and Mongoose save failed:', saveError);
-        throw new Error('Failed to update balance');
+        throw new Error(`Failed to update balance: ${saveError.message}`);
       }
     }
 
@@ -210,13 +335,13 @@ export async function POST(req: Request) {
         sessionsAdded: sessionsToAdd,
         wasNewBalance: !balance._id // Indicates if this was a newly created balance
       },
-        calculation: {
+      calculation: {
           totalSessions: appointment.totalSessions,
           completedSessions: appointment.completedSessions,
           remainingSessions: remainingSessions,
-          chargeApplied: charge,
-          finalSessionsAdded: sessionsToAdd
-        },
+        chargeApplied: charge,
+        finalSessionsAdded: sessionsToAdd
+      },
       timeValidation: {
         currentTimeUTC: nowUTC.toISOString(),
         appointmentTimeUTC: appointmentDateUTC.toISOString(),

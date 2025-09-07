@@ -33,6 +33,19 @@ export interface IAppointment extends Document {
   oldTherapies?: string[];
   completedSessions: number;
   totalSessions: number;
+  sessionCount: number; // Actual number of sessions (main + recurring)
+  sessionUnitsTotal: number; // Total session units for balance calculations (price / unitPrice)
+  payment: {
+    method: 'balance' | 'stripe' | 'mixed';
+    sessionsPaidWithBalance: number;
+    sessionsPaidWithStripe: number;
+    unitPrice: number;
+    currency: string;
+    stripeChargeId?: string;
+    useBalance: boolean;
+    refundedUnitsFromBalance: number;
+    refundedUnitsFromStripe: number;
+  };
   createdAt?: Date;
   updatedAt?: Date;
   isConfirmed: boolean;
@@ -202,6 +215,53 @@ const appointmentSchema: Schema = new mongoose.Schema(
       type: Number,
       default: 1,
     },
+    sessionCount: {
+      type: Number,
+      default: 1,
+    },
+    sessionUnitsTotal: {
+      type: Number,
+      default: 0,
+    },
+    payment: {
+      method: {
+        type: String,
+        enum: ['balance', 'stripe', 'mixed'],
+        default: 'stripe'
+      },
+      sessionsPaidWithBalance: {
+        type: Number,
+        default: 0
+      },
+      sessionsPaidWithStripe: {
+        type: Number,
+        default: 0
+      },
+      unitPrice: {
+        type: Number,
+        default: 90
+      },
+      currency: {
+        type: String,
+        default: 'AED'
+      },
+      stripeChargeId: {
+        type: String,
+        default: null
+      },
+      useBalance: {
+        type: Boolean,
+        default: false
+      },
+      refundedUnitsFromBalance: {
+        type: Number,
+        default: 0
+      },
+      refundedUnitsFromStripe: {
+        type: Number,
+        default: 0
+      }
+    },
     recurring: {
       type: [Schema.Types.Mixed],
       default: [],
@@ -331,11 +391,6 @@ const appointmentSchema: Schema = new mongoose.Schema(
   isStripeVerified: {
     type: Boolean,
     default: false,
-  },
-  payment: {
-    type: String,
-    enum: ['paid', 'unpaid', 'pending'],
-    default: 'unpaid',
   },
   paidAt: {
     type: Date,
@@ -493,6 +548,11 @@ appointmentSchema.pre<IAppointment>('save', async function (next) {
 // Delete the existing model if it exists to avoid OverwriteModelError
 if (mongoose.models.Appointment) {
   delete mongoose.models.Appointment;
+}
+
+// Also clear from mongoose.modelSchemas
+if (mongoose.modelSchemas && mongoose.modelSchemas.Appointment) {
+  delete mongoose.modelSchemas.Appointment;
 }
 
 const Appointment = mongoose.model<IAppointment>('Appointment', appointmentSchema);

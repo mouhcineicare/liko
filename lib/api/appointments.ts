@@ -134,6 +134,19 @@ interface CreateAppointmentData {
   status?: string;
   paymentStatus?: string;
   totalSessions?: number;
+  sessionCount?: number;
+  sessionUnitsTotal?: number;
+  payment?: {
+    method: 'balance' | 'stripe' | 'mixed';
+    sessionsPaidWithBalance: number;
+    sessionsPaidWithStripe: number;
+    unitPrice: number;
+    currency: string;
+    stripeChargeId?: string;
+    useBalance: boolean;
+    refundedUnitsFromBalance: number;
+    refundedUnitsFromStripe: number;
+  };
   isConfirmed: boolean;
   isAccepted?: boolean | null;
   hasPreferedDate: boolean;
@@ -150,24 +163,30 @@ export async function createAppointment(appointmentData: CreateAppointmentData) 
   
   await connectDB();
 
-  // Calculate total sessions based on plan type
+  // Calculate total sessions based on plan type or provided data
   let totalSessions = 1; // Default to 1
-  switch (appointmentData.planType) {
-    case 'x2_sessions': totalSessions = 2; break;
-    case 'x3_sessions': totalSessions = 3; break;
-    case 'x4_sessions': totalSessions = 4; break;
-    case 'x5_sessions': totalSessions = 5; break;
-    case 'x6_sessions': totalSessions = 6; break;
-    case 'x7_sessions': totalSessions = 7; break;
-    case 'x8_sessions': totalSessions = 8; break;
-    case 'x9_sessions': totalSessions = 9; break;
-    case 'x10_sessions': totalSessions = 10; break;
-    case 'x12_sessions': totalSessions = 12; break;
-    default: totalSessions = 1;
-  }
-
-  if(!appointmentData.planType && appointmentData.recurring){
-    totalSessions = (appointmentData?.totalSessions) || ((appointmentData.recurring.length || 0) + 1);
+  
+  // If totalSessions is explicitly provided (e.g., from rebooking), use it
+  if (appointmentData.totalSessions && appointmentData.totalSessions > 0) {
+    totalSessions = appointmentData.totalSessions;
+  } else if (appointmentData.planType) {
+    // Use plan type calculation for standard plans
+    switch (appointmentData.planType) {
+      case 'x2_sessions': totalSessions = 2; break;
+      case 'x3_sessions': totalSessions = 3; break;
+      case 'x4_sessions': totalSessions = 4; break;
+      case 'x5_sessions': totalSessions = 5; break;
+      case 'x6_sessions': totalSessions = 6; break;
+      case 'x7_sessions': totalSessions = 7; break;
+      case 'x8_sessions': totalSessions = 8; break;
+      case 'x9_sessions': totalSessions = 9; break;
+      case 'x10_sessions': totalSessions = 10; break;
+      case 'x12_sessions': totalSessions = 12; break;
+      default: totalSessions = 1;
+    }
+  } else if (appointmentData.recurring && appointmentData.recurring.length > 0) {
+    // Calculate from recurring sessions if no plan type
+    totalSessions = (appointmentData.recurring.length || 0) + 1;
   }
 
   console.log('lib/api/appointments.ts - Calculated totalSessions:', totalSessions);
@@ -201,6 +220,18 @@ export async function createAppointment(appointmentData: CreateAppointmentData) 
     status: appointmentData.status || (appointmentData.therapist ? "confirmed" : "pending_match"),
     paymentStatus: appointmentData.paymentStatus || "pending",
     totalSessions,
+    sessionCount: appointmentData.sessionCount || totalSessions,
+    sessionUnitsTotal: appointmentData.sessionUnitsTotal || (appointmentData.price / 90),
+    payment: appointmentData.payment || {
+      method: 'stripe',
+      sessionsPaidWithBalance: 0,
+      sessionsPaidWithStripe: appointmentData.price / 90,
+      unitPrice: 90,
+      currency: 'AED',
+      useBalance: false,
+      refundedUnitsFromBalance: 0,
+      refundedUnitsFromStripe: 0
+    },
     completedSessions: 0,
     isConfirmed: appointmentData?.isConfirmed || false,
     hasPreferedDate: appointmentData.therapist ? false : true,
@@ -213,10 +244,18 @@ export async function createAppointment(appointmentData: CreateAppointmentData) 
   };
 
   console.log('lib/api/appointments.ts - Appointment object before save:', JSON.stringify(appointmentObject, null, 2));
+  console.log('lib/api/appointments.ts - New fields check:', {
+    sessionCount: appointmentData.sessionCount,
+    sessionUnitsTotal: appointmentData.sessionUnitsTotal,
+    payment: appointmentData.payment
+  });
   console.log('lib/api/appointments.ts - Status logic debug:', {
     providedStatus: appointmentData.status,
     hasTherapist: !!appointmentData.therapist,
-    finalStatus: appointmentObject.status
+    isRebooking: appointmentData.isRebooking,
+    finalStatus: appointmentObject.status,
+    paymentStatus: appointmentObject.paymentStatus,
+    isConfirmed: appointmentObject.isConfirmed
   });
 
   const appointment = new Appointment(appointmentObject);

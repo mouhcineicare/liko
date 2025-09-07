@@ -10,12 +10,16 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
   try {
+    console.log('=== /api/patient/appointments GET START ===');
     const session = await getServerSession(authOptions);
     if (!session || !session.user) {
+      console.log('No session found, returning 401');
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    console.log('Session found:', { userId: session.user.id, role: session.user.role });
     await connectDB();
+    console.log('Database connected successfully');
 
     const url = new URL(req.url);
     const skip = Number.parseInt(url.searchParams.get("skip") || "0");
@@ -134,15 +138,32 @@ export async function GET(req: Request) {
       })
     );
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       appointments: verifiedAppointments,
       total: statusCounts.all, // Use total count from statusCounts
       counts: statusCounts,    // Include all status counts
       ok: true,
     });
+    
+    // Add CORS headers
+    response.headers.set('Access-Control-Allow-Origin', '*');
+    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    
+    console.log('=== /api/patient/appointments GET SUCCESS ===');
+    return response;
   } catch (error) {
+    console.error("=== /api/patient/appointments GET ERROR ===");
     console.error("Error fetching appointments:", error);
-    return NextResponse.json({ error: "Error fetching appointments" }, { status: 500 });
+    console.error("Error details:", {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      name: error instanceof Error ? error.name : 'Unknown'
+    });
+    return NextResponse.json({ 
+      error: "Error fetching appointments",
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }
 

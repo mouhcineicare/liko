@@ -419,6 +419,12 @@ const handlePurchaseSessions = async (sessions: number) => {
     return;
   }
 
+  // Prevent double clicks
+  if (isLoading) {
+    console.log('Already processing booking, ignoring duplicate click');
+    return;
+  }
+
   setIsLoading(true);
   
   try {
@@ -547,6 +553,12 @@ const handleSameDayPayRemaining = async () => {
 const handlePayFully = async (daySlots: any[], totalPrice: number) => {
   if (daySlots.length === 0) return;
   
+  // Prevent double clicks
+  if (isLoading) {
+    console.log('Already processing payment, ignoring duplicate click');
+    return;
+  }
+  
   setIsLoading(true);
   
   try {
@@ -556,6 +568,14 @@ const handlePayFully = async (daySlots: any[], totalPrice: number) => {
     );
 
     const [firstSession, ...recurringSessions] = sortedSessions;
+
+    console.log('Frontend rebooking data:', {
+      totalSlots: daySlots.length,
+      firstSession,
+      recurringSessions,
+      recurringSessionsLength: recurringSessions.length,
+      totalPrice
+    });
 
     // Create the appointment first
     console.log('Creating appointment with data:', {

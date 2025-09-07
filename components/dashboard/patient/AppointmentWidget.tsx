@@ -64,15 +64,49 @@ const AppointmentWidget: React.FC<AppointmentWidgetProps> = ({
   const [showSessionRescheduleDialog, setShowSessionRescheduleDialog] = useState(false);
   const [selectedSessionIndex, setSelectedSessionIndex] = useState<number | null>(null);
   
+  // Calculate session count more robustly
+  const calculateSessionCount = () => {
+    // First try the explicit sessionCount field
+    if (appointment.sessionCount && appointment.sessionCount > 0) {
+      return appointment.sessionCount;
+    }
+    
+    // Then try totalSessions field
+    if (appointment.totalSessions && appointment.totalSessions > 0) {
+      return appointment.totalSessions;
+    }
+    
+    // Finally calculate from recurring array
+    if (appointment.recurring && Array.isArray(appointment.recurring)) {
+      return appointment.recurring.length + 1; // +1 for the main session
+    }
+    
+    return 1; // Default fallback
+  };
+
   const service = {
     duration: 60,
-    sessionCount: appointment.recurring ? (appointment.recurring.length + 1 || 1) : 1
+    sessionCount: calculateSessionCount()
   }
 
   // Calculate session details
   const duration = service?.duration || 60;
   const count = service?.sessionCount || 1;
+  
+  // Debug logging for session count
+  console.log('AppointmentWidget debug:', {
+    appointmentId: appointment._id,
+    sessionCount: appointment.sessionCount,
+    totalSessions: appointment.totalSessions,
+    recurringLength: appointment.recurring?.length,
+    calculatedCount: count,
+    recurring: appointment.recurring
+  });
   const therapist = appointment.therapist;
+  
+  // Calculate per-session price for display
+  // Always show per-session price for multi-session appointments
+  const perSessionPrice = count > 1 ? appointment.price / count : appointment.price;
 
   // Check if payment is required
   const isUnpaid = !appointment.isStripeVerified && !appointment.isBalance;
@@ -175,10 +209,20 @@ const AppointmentWidget: React.FC<AppointmentWidgetProps> = ({
 
   const statusInfo = getStatusInfo(appointment.status);
 
-  // Check if recurring sessions exist and are not just strings
+  // Check if recurring sessions exist - be more flexible for rebooked appointments
   const hasRecurringSessions = Array.isArray(appointment.recurring) && 
-                              appointment.recurring.length > 0 && 
-                              typeof appointment.recurring[0] !== 'string';
+                              appointment.recurring.length > 0;
+
+  // Debug recurring sessions
+  console.log('Recurring sessions debug:', {
+    appointmentId: appointment._id,
+    hasRecurringSessions,
+    recurringArray: appointment.recurring,
+    recurringLength: appointment.recurring?.length,
+    firstItemType: appointment.recurring?.[0] ? typeof appointment.recurring[0] : 'undefined',
+    sessionCount: appointment.sessionCount,
+    totalSessions: appointment.totalSessions
+  });
 
   // Function to get status display for recurring sessions
   const getRecurringSessionStatus = (status: string) => {
@@ -226,6 +270,13 @@ const AppointmentWidget: React.FC<AppointmentWidgetProps> = ({
                  appointment.therapyType === 'couples' ? 'Couples Therapy' : 
                  appointment.therapyType === 'kids' ? 'Kids Therapy' : 'Therapy'} - {appointment.plan}
               </p>
+              {count > 1 && (
+                <div className="mt-1">
+                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    {count} Sessions Package
+                  </span>
+                </div>
+              )}
             </div>
           </div>
           
@@ -268,7 +319,7 @@ const AppointmentWidget: React.FC<AppointmentWidgetProps> = ({
             <CreditCard className="w-5 h-5 text-gray-500" />
             <div>
               <p className="font-medium text-gray-800">
-                AED {(appointment.price).toFixed(2)}
+                AED {perSessionPrice.toFixed(2)}
               </p>
               <p className="text-sm text-gray-600">
                 {duration} min • {count} sessions 
@@ -341,9 +392,14 @@ const AppointmentWidget: React.FC<AppointmentWidgetProps> = ({
 
             {showRecurringSessions && appointment.recurring && (
               <div className="mt-3 space-y-3 pl-2 border-l-2 border-gray-200">
-                {(appointment.recurring as SessionObject[]).map((session, index) => {
-                  const sessionStatus = getRecurringSessionStatus(session.status);
-                  const isCompleted = session.status === 'completed';
+                {appointment.recurring.map((session, index) => {
+                  // Handle both string and object formats
+                  const sessionDate = typeof session === 'string' ? session : session.date;
+                  const sessionStatus = typeof session === 'object' ? session.status : 'in_progress';
+                  const sessionPayment = typeof session === 'object' ? session.payment : 'not_paid';
+                  
+                  const statusInfo = getRecurringSessionStatus(sessionStatus);
+                  const isCompleted = sessionStatus === 'completed';
                   const canReschedule = !isCompleted && appointment.therapist?.id;
                   
                   return (
@@ -351,14 +407,14 @@ const AppointmentWidget: React.FC<AppointmentWidgetProps> = ({
                       <div className="mt-1 w-2 h-2 rounded-full bg-gray-400"></div>
                       <div className="flex-1">
                         <p className="font-medium text-gray-800">
-                          {format(new Date(session.date), 'EEEE, MMMM d, yyyy')}
+                          {format(new Date(sessionDate), 'EEEE, MMMM d, yyyy')}
                         </p>
                         <p className="text-sm text-gray-600">
-                          at {format(new Date(session.date), 'h:mm a')}
+                          at {format(new Date(sessionDate), 'h:mm a')}
                         </p>
                         <div className="mt-1 flex items-center gap-2">
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${sessionStatus.bg} ${sessionStatus.color}`}>
-                            {sessionStatus.text}
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${statusInfo.bg} ${statusInfo.color}`}>
+                            {statusInfo.text}
                           </span>
                           {canReschedule && (
                             <Button

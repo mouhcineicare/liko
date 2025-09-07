@@ -15,12 +15,16 @@ const DEFAULT_BALANCE_RATE = 90;
 
 export async function GET(request: Request) {
   try {
+    console.log('=== /api/patient/sessions GET START ===');
     const session = await getServerSession(authOptions);
     if (!session) {
+      console.log('No session found, returning 401');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    console.log('Session found:', { userId: session.user.id, role: session.user.role });
     await dbConnect();
+    console.log('Database connected successfully');
 
     // Get the current user (patient)
     const user = await User.findById(session.user.id);
@@ -45,7 +49,7 @@ export async function GET(request: Request) {
       });
     }
     
-    return NextResponse.json({
+    const response = NextResponse.json({
       balance: {
         totalSessions: parseFloat(balance.remainingSessions) * DEFAULT_BALANCE_RATE,
         history: (balance.history || []).filter((item: any) => item.plan && item.action === "added")
@@ -56,10 +60,27 @@ export async function GET(request: Request) {
         email: user.email
       }
     });
+    
+    // Add CORS headers
+    response.headers.set('Access-Control-Allow-Origin', '*');
+    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    
+    console.log('=== /api/patient/sessions GET SUCCESS ===');
+    return response;
   } catch (error) {
+    console.error('=== /api/patient/sessions GET ERROR ===');
     console.error('Error fetching patient sessions:', error);
+    console.error('Error details:', {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      name: error instanceof Error ? error.name : 'Unknown'
+    });
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
@@ -94,7 +115,8 @@ export async function POST(request: Request) {
       discountPercentage,
       discount,
       isRebooking,
-      paymentMethod
+      paymentMethod,
+      useBalance
     } = requestData;
 
     console.log('Debug rebook status logic:', {
@@ -178,36 +200,68 @@ export async function POST(request: Request) {
       })) : [],
       therapyType: therapyType || therapyTypeText,
       status: (() => {
+        if (isRebooking && session.user.therapyId) {
+          // For rebooking with existing therapist, always confirm immediately
+          console.log('Setting status to confirmed (rebooking with existing therapist)');
+          return "confirmed";
+        }
         if (paymentMethod !== 'stripe') {
           console.log('Setting status to confirmed (balance payment)');
           return "confirmed";
         }
-        if (isRebooking && session.user.therapyId) {
-          console.log('Setting status to confirmed (rebook with therapist)');
-          return "confirmed";
-        }
-        console.log('Setting status to pending_match (new appointment)');
-        return "pending_match";
+        // For new Stripe payments, start as unpaid until payment completes
+        console.log('Setting status to unpaid (new Stripe payment pending)');
+        return "unpaid";
       })(),
-      paymentStatus: paymentMethod === 'stripe' ? "pending" : "completed",
+      paymentStatus: (isRebooking && session.user.therapyId) ? "completed" : (paymentMethod === 'stripe' ? "pending" : "completed"),
       hasPreferedDate: false,
       localTimeZone,
-      isConfirmed: paymentMethod === 'stripe' ? (isRebooking && session.user.therapyId ? true : false) : true,
+      isConfirmed: (isRebooking && session.user.therapyId) ? true : (paymentMethod === 'stripe' ? false : true),
       patientTimezone: localTimeZone,
       isBalance: paymentMethod === 'stripe' ? false : true,
-      isStripeVerified: paymentMethod === 'stripe' ? false : true, // Will be set to true by webhook
-      totalSessions: price / DEFAULT_BALANCE_RATE, // Convert price to sessions for storage
+      isStripeVerified: (isRebooking && session.user.therapyId) ? true : (paymentMethod === 'stripe' ? false : true),
+      totalSessions: recurring ? (recurring.length + 1) : 1, // Actual number of sessions
+      sessionCount: recurring ? (recurring.length + 1) : 1, // Actual number of sessions
+      sessionUnitsTotal: price / DEFAULT_BALANCE_RATE, // Session units for balance calculations
+      payment: {
+        method: paymentMethod === 'stripe' ? 'stripe' : 'balance',
+        sessionsPaidWithBalance: paymentMethod === 'stripe' ? 0 : price / DEFAULT_BALANCE_RATE,
+        sessionsPaidWithStripe: paymentMethod === 'stripe' ? price / DEFAULT_BALANCE_RATE : 0,
+        unitPrice: DEFAULT_BALANCE_RATE,
+        currency: 'AED',
+        useBalance: useBalance || false,
+        refundedUnitsFromBalance: 0,
+        refundedUnitsFromStripe: 0
+      },
       isAccepted: isRebooking && session.user.therapyId ? true : (paymentMethod === 'stripe' ? false : true),
       discountPercentage,
       discount
     }
 
-    const createdAppointment = await createAppointment(appointment);
-    console.log('Created appointment:', createdAppointment);
-    console.log('Created appointment ID:', createdAppointment._id);
+    let createdAppointment;
+    try {
+      console.log('Creating appointment with data:', {
+        date: appointment.date,
+        price: appointment.price,
+        sessionCount: appointment.sessionCount,
+        totalSessions: appointment.totalSessions,
+        recurring: appointment.recurring,
+        recurringLength: appointment.recurring?.length,
+        paymentMethod: paymentMethod,
+        isRebooking
+      });
+      
+      createdAppointment = await createAppointment(appointment);
+      console.log('Created appointment:', createdAppointment);
+      console.log('Created appointment ID:', createdAppointment._id);
+    } catch (createError: any) {
+      console.error('Error creating appointment:', createError);
+      console.error('Appointment data that failed:', JSON.stringify(appointment, null, 2));
+      throw new Error(`Failed to create appointment: ${createError.message}`);
+    }
 
-    // Only deduct from balance if not using Stripe payment
-    if (paymentMethod !== 'stripe') {
+    // Only deduct from balance if not using Stripe payment or if useBalance is true
+    if (paymentMethod !== 'stripe' || useBalance) {
       // Calculate new spent balance in AED
       const newSpentBalanceInAED = spentBalanceInAED + price;
       const newSpentSessions = newSpentBalanceInAED / DEFAULT_BALANCE_RATE;
@@ -230,7 +284,7 @@ export async function POST(request: Request) {
 
     // Calculate remaining balance for response
     let remainingBalanceInAEDAfter, remainingSessions;
-    if (paymentMethod !== 'stripe') {
+    if (paymentMethod !== 'stripe' || useBalance) {
       const newSpentBalanceInAED = spentBalanceInAED + price;
       remainingBalanceInAEDAfter = totalBalanceInAED - newSpentBalanceInAED;
       remainingSessions = remainingBalanceInAEDAfter / DEFAULT_BALANCE_RATE;
@@ -270,9 +324,20 @@ export async function POST(request: Request) {
     }, { status: 201 });
 
   } catch (error: any) {
-    console.error('Error:', error);
+    console.error('Sessions API Error:', error);
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    
+    // Return more specific error information
     return NextResponse.json(
-      { error: 'An unexpected error occurred. Please try again.' },
+      { 
+        error: 'An unexpected error occurred. Please try again.',
+        details: error.message,
+        type: error.name
+      },
       { status: 500 }
     );
   }

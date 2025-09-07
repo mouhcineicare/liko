@@ -348,10 +348,20 @@ async function handleSuccessfulPayment(event: Stripe.Event) {
       }
     }
 
+    // Check if this is a rebook session - preserve confirmed status
+    const isRebookSession = appointment.plan === 'Purchased From Rebooking' || appointment.plan === 'Single Online Therapy Session';
+    const statusToSet = isRebookSession && appointment.status === 'confirmed' ? 'confirmed' : 'pending_match';
+    
+    console.log('Webhook status logic:', {
+      isRebookSession,
+      currentStatus: appointment.status,
+      statusToSet
+    });
+
     // Update payment status and persist Stripe identifiers for auditing
     const updateData: any = {
       paymentStatus: "completed",
-      status: "pending_match", // Use new status system - will be updated to confirmed if therapist assigned
+      status: statusToSet, // Preserve confirmed status for rebooking
       isStripeVerified: true, // Mark as Stripe verified to prevent auto-cancellation
       paidAt: new Date(),
       paymentMethod: "card",
