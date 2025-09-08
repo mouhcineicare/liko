@@ -40,8 +40,30 @@ export async function GET() {
     const processedAppointments = await Promise.all(
       activeAppointments.map(async (appointment) => {
         try {
-          // Verify Stripe payment status
-          const verification = await verifyStripePayment(appointment.checkoutSessionId, appointment.paymentIntentId);
+          // Check if payment was already verified by webhook
+          const isWebhookVerified = appointment.isStripeVerified === true && appointment.paymentStatus === 'completed';
+          
+          let verification;
+          let finalPaymentStatus;
+          let finalIsStripeVerified;
+          
+          if (isWebhookVerified) {
+            // Payment was already verified by webhook, respect that decision
+            console.log(`Appointment ${appointment._id} already verified by webhook, using webhook status`);
+            finalPaymentStatus = appointment.paymentStatus;
+            finalIsStripeVerified = appointment.isStripeVerified;
+            verification = {
+              paymentStatus: appointment.paymentStatus,
+              subscriptionStatus: 'active',
+              isActive: true
+            };
+          } else {
+            // Payment not verified by webhook, verify with Stripe
+            console.log(`Appointment ${appointment._id} not verified by webhook, verifying with Stripe`);
+            verification = await verifyStripePayment(appointment.checkoutSessionId, appointment.paymentIntentId);
+            finalPaymentStatus = verification.paymentStatus === 'paid' ? 'completed' : verification.paymentStatus;
+            finalIsStripeVerified = verification.paymentStatus === 'paid';
+          }
           
           // Map the appointment status to custom statuses
           let customStatus = '';
@@ -91,8 +113,8 @@ export async function GET() {
             customStatus: customStatus,
             isAccepted: appointment.isAccepted,
             isConfirmed: appointment.isConfirmed,
-            paymentStatus: verification.paymentStatus === 'paid' ? 'completed' : verification.paymentStatus,
-            isStripeVerified: verification.paymentStatus === 'paid',
+            paymentStatus: finalPaymentStatus,
+            isStripeVerified: finalIsStripeVerified,
             isSubscriptionActive: verification.paymentStatus === 'paid',
             meetingLink: appointment.meetingLink,
             therapyType: appointment.therapyType,
