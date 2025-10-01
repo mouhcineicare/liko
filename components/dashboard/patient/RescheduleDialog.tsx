@@ -167,7 +167,7 @@ export default function RescheduleDialog({
       const response = await fetch('/api/patient/sessions');
       if (response.ok) {
         const data = await response.json();
-        setSessionBalance(data.balance.totalSessions);
+        setSessionBalance(data.balance.balanceAmount);
       }
     } catch (error) {
       console.error("Failed to fetch session balance", error);
@@ -237,7 +237,16 @@ const handleReschedule = async () => {
   }
 
   // Check if this is a same-day booking
-  if (isSameDayBooking(selectedDate, selectedTime)) {
+  const isSameDaySlot = isSameDayBooking(selectedDate, selectedTime);
+  console.log('Same-day booking check in RescheduleDialog:', {
+    selectedDate: selectedDate?.toISOString(),
+    selectedTime,
+    isSameDaySlot,
+    today: new Date().toISOString()
+  });
+  
+  if (isSameDaySlot) {
+    console.log('Showing same-day modal');
     setShowSameDayModal(true);
     return;
   }
@@ -333,8 +342,8 @@ const performReschedule = async () => {
     const totalPrice = SAME_DAY_PRICING.BASE_PRICE * SAME_DAY_PRICING.SURCHARGE_MULTIPLIER;
     const surchargeAmount = totalPrice - SAME_DAY_PRICING.BASE_PRICE;
     
-    if (sessionBalance < surchargeAmount) {
-      toast.error("Insufficient balance for same-day surcharge");
+    if (sessionBalance < totalPrice) {
+      toast.error(`Insufficient balance. You need ${totalPrice} AED but have ${sessionBalance.toFixed(2)} AED`);
       return;
     }
 
@@ -384,46 +393,43 @@ const performReschedule = async () => {
   };
 
   const handleSameDayPayNow = async () => {
-    // For same-day rescheduling with surcharge, use the reschedule endpoint
-    const totalPrice = SAME_DAY_PRICING.BASE_PRICE * SAME_DAY_PRICING.SURCHARGE_MULTIPLIER;
-    
+    // For same-day rescheduling with surcharge, use the same-day booking API directly
     try {
-      // First reschedule the appointment with surcharge
-      const rescheduleResponse = await fetch('/api/patient/appointments/reschedule', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          appointmentId: appointment._id,
-          newDate: selectedDate ? new Date(selectedDate).toISOString() : null,
-          sessionToBeReduced,
-          sessionIndex: sessionInfo?.index,
-          localTimeZone: appointment.patient?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-          isSameDayReschedule: true,
-          surchargeAmount: totalPrice - SAME_DAY_PRICING.BASE_PRICE
-        }),
-      });
+      const [hours, minutes] = selectedTime.split(":");
+      const newDate = new Date(selectedDate);
+      newDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
 
-      if (!rescheduleResponse.ok) {
-        const errorData = await rescheduleResponse.json();
-        throw new Error(errorData.error || "Failed to reschedule appointment");
-      }
-
-      const rescheduleResult = await rescheduleResponse.json();
-      console.log('Reschedule result:', rescheduleResult);
-
-      // Then redirect to payment for the surcharge
-      const paymentResponse = await fetch('/api/appointments/payment', {
+      const response = await fetch('/api/patient/appointments/same-day-booking', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          appointmentId: appointment._id
+          appointmentId: appointment._id,
+          newDate: newDate.toISOString(),
+          selectedSlot: {
+            date: newDate.toISOString(),
+            time: selectedTime,
+            therapistId: appointment.therapist?._id || appointment.therapist
+          },
+          isReschedule: true,
+          sessionToBeReduced,
+          sessionIndex: sessionInfo?.index,
+          useBalance: false // Stripe payment
         }),
       });
 
-      if (!paymentResponse.ok) throw new Error("Failed to initiate payment");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to reschedule appointment");
+      }
+
+      const data = await response.json();
       
-      const { redirectUrl } = await paymentResponse.json();
-      window.location.href = redirectUrl;
+      if (data.url) {
+        // Redirect to Stripe checkout
+        window.location.href = data.url;
+      } else {
+        throw new Error("No redirect URL provided in payment response");
+      }
     } catch (error: any) {
       toast.error(error.message || "Failed to reschedule appointment");
     }
@@ -435,42 +441,41 @@ const performReschedule = async () => {
     const remainingAmount = totalPrice - sessionBalance;
     
     try {
-      // First reschedule the appointment with surcharge
-      const rescheduleResponse = await fetch('/api/patient/appointments/reschedule', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          appointmentId: appointment._id,
-          newDate: selectedDate ? new Date(selectedDate).toISOString() : null,
-          sessionToBeReduced,
-          sessionIndex: sessionInfo?.index,
-          localTimeZone: appointment.patient?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-          isSameDayReschedule: true,
-          surchargeAmount: totalPrice - SAME_DAY_PRICING.BASE_PRICE
-        }),
-      });
+      const [hours, minutes] = selectedTime.split(":");
+      const newDate = new Date(selectedDate);
+      newDate.setHours(parseInt(hours), parseInt(minutes), 0, 0);
 
-      if (!rescheduleResponse.ok) {
-        const errorData = await rescheduleResponse.json();
-        throw new Error(errorData.error || "Failed to reschedule appointment");
-      }
-
-      const rescheduleResult = await rescheduleResponse.json();
-      console.log('Reschedule result:', rescheduleResult);
-
-      // Then redirect to payment for the remaining amount
-      const paymentResponse = await fetch('/api/appointments/payment', {
+      const response = await fetch('/api/patient/appointments/same-day-booking', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          appointmentId: appointment._id
+          appointmentId: appointment._id,
+          newDate: newDate.toISOString(),
+          selectedSlot: {
+            date: newDate.toISOString(),
+            time: selectedTime,
+            therapistId: appointment.therapist?._id || appointment.therapist
+          },
+          isReschedule: true,
+          sessionToBeReduced,
+          sessionIndex: sessionInfo?.index,
+          useBalance: false // Stripe payment for remaining amount
         }),
       });
 
-      if (!paymentResponse.ok) throw new Error("Failed to initiate payment");
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to reschedule appointment");
+      }
+
+      const data = await response.json();
       
-      const { redirectUrl } = await paymentResponse.json();
-      window.location.href = redirectUrl;
+      if (data.url) {
+        // Redirect to Stripe checkout
+        window.location.href = data.url;
+      } else {
+        throw new Error("No redirect URL provided in payment response");
+      }
     } catch (error: any) {
       toast.error(error.message || "Failed to reschedule appointment");
     }
@@ -564,6 +569,11 @@ const performReschedule = async () => {
                           onClick={() => {
                             if (isAvailable) {
                               setSelectedDate(date);
+                              // Check if this is a same-day booking when date is selected
+                              if (selectedTime && isSameDayBooking(date, selectedTime)) {
+                                console.log('Same-day date clicked, showing modal');
+                                setShowSameDayModal(true);
+                              }
                               setTimeout(() => {
                                 timeSlotRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                               }, 100);
@@ -629,12 +639,25 @@ const performReschedule = async () => {
                     {availableSlots.map((slot) => {
                       const time = format(new Date(slot.start), "HH:mm");
                       const isSameDaySlot = selectedDate && isSameDayBooking(selectedDate, time);
+                      console.log('Time slot same-day check:', {
+                        time,
+                        selectedDate: selectedDate?.toISOString(),
+                        isSameDaySlot,
+                        today: new Date().toISOString()
+                      });
                       
                       return (
                         <Col span={timeSlotSpan} key={time}>
                           <Card
                             hoverable
-                            onClick={() => setSelectedTime(time)}
+                            onClick={() => {
+                              setSelectedTime(time);
+                              // Check if this is a same-day booking when time is selected
+                              if (selectedDate && isSameDayBooking(selectedDate, time)) {
+                                console.log('Same-day slot clicked, showing modal');
+                                setShowSameDayModal(true);
+                              }
+                            }}
                             className={`text-center transition-all duration-200 !rounded-lg ${
                               selectedTime === time
                                 ? isSameDaySlot

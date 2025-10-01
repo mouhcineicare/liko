@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { format, isBefore, isPast, addHours } from "date-fns";
+import { toZonedTime } from "date-fns-tz";
 import { 
   Loader2,
   CheckCircle,
@@ -18,6 +19,8 @@ import {
   Clock,
   ChevronUp,
   ChevronDown,
+  RotateCcw,
+  UserX,
   CreditCard,
   MessageCircle
 } from "lucide-react";
@@ -69,6 +72,36 @@ const safeParseDate = (dateValue: any): Date | null => {
   }
 };
 
+// Time formatter function to display both local and UAE time
+const formatAppointmentTime = (dateString: string) => {
+  try {
+    // Get patient's local timezone
+    const patientTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    
+    // Create Date object from the date string
+    const date = new Date(dateString);
+    
+    // Format local time (patient's timezone)
+    const localTime = format(toZonedTime(date, patientTimeZone), 'h:mm a');
+    
+    // Format UAE time
+    const uaeTime = format(toZonedTime(date, 'Asia/Dubai'), 'h:mm a');
+    
+    return {
+      localTime,
+      uaeTime,
+      patientTimeZone: patientTimeZone.split('/')[1] || patientTimeZone
+    };
+  } catch (error) {
+    console.error('Error formatting appointment time:', error);
+    return {
+      localTime: format(new Date(dateString), 'h:mm a'),
+      uaeTime: format(new Date(dateString), 'h:mm a'),
+      patientTimeZone: 'Local'
+    };
+  }
+};
+
 interface Appointment {
   _id: string;
   id: string;
@@ -88,6 +121,8 @@ interface Appointment {
   reason?: string;
   isStripeVerified?: boolean;
   isBalance?: boolean | null;
+  isPaid?: boolean;
+  verificationSource?: string;
   therapyType: string;
   plan: string;
   price: number;
@@ -105,6 +140,7 @@ interface Appointment {
 }
 
 const AppointmentStatusView = () => {
+  const router = useRouter();
   const [statusData, setStatusData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -118,7 +154,6 @@ const AppointmentStatusView = () => {
   const [activeChatConversation, setActiveChatConversation] = useState<string | null>(null);
   const [activeChatTherapist, setActiveChatTherapist] = useState<{id: string, name: string} | null>(null);
   const { data: session, update: updateUserSession } = useSession();
-  const router = useRouter();
 
   const fetchStatusData = useCallback(async () => {
     try {
@@ -406,14 +441,21 @@ const AppointmentStatusView = () => {
   // Get all active appointments and separate paid vs unpaid
   const allAppointments = statusData?.appointments || [];
   const paidAppointments = allAppointments.filter((apt: Appointment) => 
-    (apt.isStripeVerified || apt.isBalance) && 
+    ((apt.isStripeVerified === true) || (apt.isBalance === true)) && 
     apt.status !== 'unpaid' && 
     apt.status !== 'cancelled' && 
-    apt.status !== 'completed'
+    apt.status !== 'completed' &&
+    apt._id !== currentAppointment?._id // Exclude current appointment to avoid duplication
   );
+  
+  // Create a Set to track displayed appointment IDs to prevent duplicates
+  const displayedAppointmentIds = new Set<string>();
+  if (currentAppointment && ((currentAppointment.isStripeVerified === true) || (currentAppointment.isBalance === true))) {
+    displayedAppointmentIds.add(currentAppointment._id);
+  }
   const unpaidAppointments = allAppointments.filter((apt: Appointment) => 
     apt.status === 'unpaid' || 
-    (!apt.isStripeVerified && !apt.isBalance && apt.paymentStatus !== 'completed')
+    (!((apt.isStripeVerified === true) || (apt.isBalance === true)))
   );
 
   // Show banner for all patients - no need to check specific statuses
@@ -569,6 +611,19 @@ const AppointmentStatusView = () => {
                           <p className="font-medium">
                             {format(new Date(appointment.date), 'MMM d, yyyy')}
                           </p>
+                          {(() => {
+                            const timeInfo = formatAppointmentTime(appointment.date);
+                            return (
+                              <div className="text-sm text-gray-500 mt-1">
+                                <div className="font-medium">
+                                  {timeInfo.localTime} ({timeInfo.patientTimeZone})
+                                </div>
+                                <div className="text-xs">
+                                  {timeInfo.uaeTime} (UAE)
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
 
@@ -639,7 +694,194 @@ const AppointmentStatusView = () => {
           </div>
           
           <div className="space-y-4">
-            {paidAppointments.length === 0 ? (
+            {/* Show current appointment if it exists and is paid */}
+            {currentAppointment && ((currentAppointment.isStripeVerified === true) || (currentAppointment.isBalance === true)) && (
+              (() => {
+                const appointment = currentAppointment;
+                const isUnpaid = !((appointment.isStripeVerified === true) || (appointment.isBalance === true));
+                const canShowPayButton = isUnpaid && appointment.status !== 'cancelled' && appointment.status !== 'completed' && !isAppointmentExpired(appointment.date);
+
+                return (
+                  <div key={appointment.id} className="bg-white rounded-lg shadow-sm border border-blue-200 p-4">
+                    {/* Package Header */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="text-2xl">
+                          {appointment.therapyType === 'individual' ? '🧑' :
+                           appointment.therapyType === 'couples' ? '👫' : '🧒'}
+                        </div>
+                        <div>
+                          <h4 className="font-medium text-gray-800">{appointment.plan}</h4>
+                          <p className="text-sm text-gray-600">
+                            {appointment.therapyType === 'individual' ? 'Individual Therapy' :
+                             appointment.therapyType === 'couples' ? 'Couples Therapy' : 'Kids Therapy'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {isUnpaid ? (
+                          <Badge className="bg-orange-100 text-orange-800 border-orange-200">
+                            Payment Required
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-green-100 text-green-800 border-green-200">
+                            Active
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Package Details Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm mb-4">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-gray-500" />
+                        <div>
+                          <p className="text-gray-600">Next Session</p>
+                          <p className="font-medium">
+                            {format(new Date(appointment.date), 'MMM d, yyyy')}
+                          </p>
+                          {(() => {
+                            const timeInfo = formatAppointmentTime(appointment.date);
+                            return (
+                              <div className="text-sm text-gray-500 mt-1">
+                                <div className="font-medium">
+                                  {timeInfo.localTime} ({timeInfo.patientTimeZone})
+                                </div>
+                                <div className="text-xs">
+                                  {timeInfo.uaeTime} (UAE)
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-gray-500" />
+                        <div>
+                          <p className="text-gray-600">Sessions</p>
+                          <p className="font-medium">1 of 1</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <CreditCard className="w-4 h-4 text-gray-500" />
+                        <div>
+                          <p className="text-gray-600">Price</p>
+                          <p className="font-medium">AED {appointment.price}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Payment Information or Pay Now Button */}
+                    {isUnpaid ? (
+                      <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <AlertCircle className="w-5 h-5 text-orange-600" />
+                            <div>
+                              <p className="text-orange-800 font-medium">Payment Required</p>
+                              <p className="text-orange-700 text-sm">Complete payment to activate this appointment</p>
+                            </div>
+                          </div>
+                          {canShowPayButton && (
+                            <Button
+                              onClick={() => router.push(`/payment?appointmentId=${appointment._id}&amount=${appointment.price}`)}
+                              size="sm"
+                              className="bg-orange-600 hover:bg-orange-700 text-white"
+                            >
+                              <CreditCard className="w-4 h-4 mr-2" />
+                              Pay Now
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      (appointment.paidAt || appointment.paymentHistory) && (
+                        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                            <h5 className="font-medium text-green-800">Payment Information</h5>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                            {appointment.paidAt && (
+                              <div className="flex items-center gap-2">
+                                <Calendar className="w-4 h-4 text-green-600" />
+                                <div>
+                                  <p className="text-green-700">Paid At</p>
+                                  <p className="font-medium text-green-800">
+                                    {format(new Date(appointment.paidAt), 'MMM d, yyyy \'at\' h:mm a')}
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+                            {appointment.paymentHistory && appointment.paymentHistory.length > 0 && (
+                              <div className="flex items-center gap-2">
+                                <CreditCard className="w-4 h-4 text-green-600" />
+                                <div>
+                                  <p className="text-green-700">Payment Method</p>
+                                  <p className="font-medium text-green-800 capitalize">
+                                    {appointment.paymentHistory[0].paymentMethod}
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    )}
+
+                    {/* Status and Actions */}
+                    <div className="flex items-center justify-between pt-3 border-t border-gray-200">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-600">Status:</span>
+                        <Badge variant="outline" className="text-xs">
+                          {appointment.customStatus || appointment.status}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-2 pt-3 border-t border-gray-200">
+                      {/* Only show reschedule button for confirmed and upcoming appointments */}
+                      {(appointment.status === 'confirmed' || appointment.customStatus === 'upcoming') && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedAppointment(appointment);
+                            setShowRescheduleDialog(true);
+                          }}
+                          className="flex-1"
+                        >
+                          <RotateCcw className="w-4 h-4 mr-2" />
+                          Reschedule
+                        </Button>
+                      )}
+                      
+                      {/* Only show cancel button for appointments that can be cancelled */}
+                      {appointment.status !== 'cancelled' && appointment.status !== 'completed' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedAppointment(appointment);
+                            setShowCancellationDialog(true);
+                          }}
+                          className="flex-1"
+                        >
+                          <UserX className="w-4 h-4 mr-2" />
+                          Cancel
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()
+            )}
+            
+            {(!currentAppointment || !((currentAppointment.isStripeVerified === true) || (currentAppointment.isBalance === true))) && paidAppointments.length === 0 ? (
               <div className="text-center py-8">
                 <CheckCircle className="mx-auto h-12 w-12 text-gray-400 mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">No Active Packages</h3>
@@ -651,7 +893,10 @@ const AppointmentStatusView = () => {
                 </p>
               </div>
             ) : (
-              paidAppointments.map((appointment: Appointment) => {
+              paidAppointments.filter((appointment: Appointment) => !displayedAppointmentIds.has(appointment._id)).map((appointment: Appointment) => {
+                // Add to displayed set
+                displayedAppointmentIds.add(appointment._id);
+                
                 const isExpanded = expandedPackages.has(appointment.id);
                 const hasRecurringSessions = appointment.recurring && Array.isArray(appointment.recurring) && appointment.recurring.length > 0;
                 const totalSessions = hasRecurringSessions ? appointment.recurring.length + 1 : 1;
@@ -691,9 +936,22 @@ const AppointmentStatusView = () => {
                         <p className="text-gray-600">Next Session</p>
                         <p className="font-medium">
                           {format(new Date(appointment.date), 'MMM d, yyyy')}
-          </p>
-        </div>
-      </div>
+                        </p>
+                        {(() => {
+                          const timeInfo = formatAppointmentTime(appointment.date);
+                          return (
+                            <div className="text-sm text-gray-500 mt-1">
+                              <div className="font-medium">
+                                {timeInfo.localTime} ({timeInfo.patientTimeZone})
+                              </div>
+                              <div className="text-xs">
+                                {timeInfo.uaeTime} (UAE)
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
 
                     <div className="flex items-center gap-2">
                       <Clock className="w-4 h-4 text-gray-500" />
@@ -900,7 +1158,14 @@ const AppointmentStatusView = () => {
                                     {sessionName} - {format(new Date(sessionDate), 'EEEE, MMMM d, yyyy')}
                                   </p>
                                   <p className="text-sm text-gray-600">
-                                    at {format(new Date(sessionDate), 'h:mm a')}
+                                    {(() => {
+                                      const timeInfo = formatAppointmentTime(sessionDate);
+                                      return (
+                                        <>
+                                          {timeInfo.localTime} ({timeInfo.patientTimeZone}) | {timeInfo.uaeTime} (UAE)
+                                        </>
+                                      );
+                                    })()}
                                   </p>
                                 </div>
           </div>

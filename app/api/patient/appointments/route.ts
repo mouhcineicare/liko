@@ -5,6 +5,7 @@ import connectDB from "@/lib/db/connect";
 import Appointment from "@/lib/db/models/Appointment";
 import stripe from "@/lib/stripe";
 import { verifyStripePayment } from '@/lib/stripe/verification';
+import { verifyAppointmentPayment } from '@/lib/services/payment-verification';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,10 +93,21 @@ export async function GET(req: Request) {
         select: 'fullName image telephone specialties summary experience'
       });
 
-    // Verify payments using the shared verification method
+    // Verify payments using the centralized verification method
     const verifiedAppointments = await Promise.all(
       appointments.map(async (appointment) => {
-        const verification = await verifyStripePayment(appointment.checkoutSessionId, appointment.paymentIntentId);
+        const paymentVerification = await verifyAppointmentPayment(appointment);
+        
+        console.log(`Appointment ${appointment._id} payment verification:`, {
+          isPaid: paymentVerification.isPaid,
+          paymentStatus: paymentVerification.paymentStatus,
+          isStripeVerified: paymentVerification.isStripeVerified,
+          isBalance: paymentVerification.isBalance,
+          verificationSource: paymentVerification.verificationSource,
+          originalIsStripeVerified: appointment.isStripeVerified,
+          originalIsBalance: appointment.isBalance,
+          originalPaymentStatus: appointment.paymentStatus
+        });
         
         // Map the appointment status to custom statuses
         let customStatus = '';
@@ -128,12 +140,14 @@ export async function GET(req: Request) {
         return {
           ...appointment.toObject(),
           status: customStatus,
-          isStripeVerified: verification.paymentStatus === 'paid',
-          isBalance: appointment.isBalance || false,
-          isSubscriptionActive: verification.paymentStatus === 'paid',
+          isStripeVerified: paymentVerification.isStripeVerified,
+          isBalance: paymentVerification.isBalance,
+          isSubscriptionActive: paymentVerification.isPaid,
           canReschedule: appointment.status === 'cancelled',
-          paymentStatus: verification.paymentStatus,
-          subscriptionStatus: verification.subscriptionStatus
+          paymentStatus: paymentVerification.paymentStatus,
+          subscriptionStatus: paymentVerification.isPaid ? 'active' : 'none',
+          isPaid: paymentVerification.isPaid,
+          verificationSource: paymentVerification.verificationSource
         };
       })
     );

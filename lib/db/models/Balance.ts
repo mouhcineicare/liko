@@ -1,18 +1,17 @@
 import mongoose from 'mongoose';
 
 
-export interface SessionHistoryItem {
+export interface BalanceHistoryItem {
   _id?: string;
   action: "added" | "removed" | "used";
-  sessions: number;
-  plan?: string; // Changed to string to match schema and existing data
+  amount: number; // AED amount
+  plan?: string;
   admin?: {
     _id: string;
     fullName: string;
   };
   reason?: string;
   createdAt: string;
-  price?: number;
   type?: string;
   description?: string;
   date?: Date;
@@ -21,16 +20,14 @@ export interface SessionHistoryItem {
 }
 
 export interface Balance {
-  totalSessions: number;
-  spentSessions: number;
-  remainingSessions: number;
-  history: SessionHistoryItem[];
+  balanceAmount: number; // Total AED balance
+  history: BalanceHistoryItem[];
   payments: {
     paymentId: string;
     amount: number;
     currency: string;
     date: Date;
-    sessionsAdded: number;
+    amountAdded: number; // AED amount added
     paymentType: string;
   }[];
 }
@@ -61,30 +58,24 @@ const balanceSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
-  totalSessions: {
+  balanceAmount: {
     type: Number,
     required: true,
     default: 0,
     min: 0
   },
-  spentSessions: {
-    type: Number,
-    required: true,
-    default: 0,
-    min: 0
-  },
- history: [{
+  history: [{
     action: {
       type: String,
       enum: ['added', 'removed', 'used'],
       required: true
     },
-    sessions: {
+    amount: {
       type: Number,
       required: true
     },
     plan: {
-      type: String, // Changed from ObjectId to String to match existing data
+      type: String,
       ref: 'Plan'
     },
     admin: {
@@ -95,10 +86,6 @@ const balanceSchema = new mongoose.Schema({
     createdAt: {
       type: Date,
       default: Date.now
-    },
-    price: {
-      type: Number,
-      default: 0
     },
     type: String,
     description: String,
@@ -130,7 +117,7 @@ const balanceSchema = new mongoose.Schema({
       type: Date,
       required: true
     },
-    sessionsAdded: {
+    amountAdded: {
       type: Number,
       required: true
     },
@@ -154,15 +141,9 @@ const balanceSchema = new mongoose.Schema({
     default: Date.now
   }
 }, {
-  // Add virtual for remaining sessions
   toJSON: { virtuals: true },
   toObject: { virtuals: true },
   timestamps: true
-});
-
-// Virtual property for remaining sessions
-balanceSchema.virtual('remainingSessions').get(function() {
-  return this.totalSessions - this.spentSessions > 0 ? this.totalSessions - this.spentSessions : 0;
 });
 
 // Update timestamp before saving

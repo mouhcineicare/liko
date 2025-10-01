@@ -6,8 +6,6 @@ import { authOptions } from "@/lib/auth/config";
 import { getServerSession } from "next-auth";
 import stripe from "@/lib/stripe";
 
-const DEFAULT_BALANCE_RATE = 90; // Static rate of 90 AED per session
-
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
   
@@ -40,11 +38,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // Calculate sessions based on payment amount and default rate
+    // Get the payment amount in AED
     const amountPaid = stripeSession.amount_total ? stripeSession.amount_total / 100 : 0; // Convert from cents to AED
-    const sessionsToAdd = parseFloat((amountPaid / DEFAULT_BALANCE_RATE).toFixed(2)); // Calculate with 2 decimal places
 
-    if (sessionsToAdd <= 0) {
+    if (amountPaid <= 0) {
       return NextResponse.json(
         { error: "Invalid payment amount" },
         { status: 400 }
@@ -61,21 +58,20 @@ export async function POST(req: Request) {
     const updatedBalance = await Balance.findOneAndUpdate(
       { user: session.user.id },
       { 
-        $inc: { totalSessions: sessionsToAdd },
+        $inc: { balanceAmount: amountPaid },
         $push: {
           history: {
             action: 'added',
-            sessions: sessionsToAdd,
-            reason: 'Session package purchase',
-            createdAt: new Date(),
-            price: amountPaid // Store the actual amount paid
+            amount: amountPaid,
+            reason: 'Balance purchase',
+            createdAt: new Date()
           },
           payments: {
             paymentId: stripeSession.payment_intent?.toString() || stripeSession.id,
             amount: amountPaid,
             currency: stripeSession.currency?.toUpperCase() || 'AED',
             date: new Date(),
-            sessionsAdded: sessionsToAdd,
+            amountAdded: amountPaid,
             paymentType: 'checkout_session'
           }
         }
@@ -85,10 +81,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      newBalance: updatedBalance.totalSessions,
-      sessionsAdded: sessionsToAdd,
-      amountPaid: amountPaid,
-      rateUsed: DEFAULT_BALANCE_RATE
+      newBalance: updatedBalance.balanceAmount,
+      amountAdded: amountPaid,
+      amountPaid: amountPaid
     });
 
   } catch (error: any) {

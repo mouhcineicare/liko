@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { addDays, isSameDay } from "date-fns";
+import { isSameDayBooking } from "@/lib/constants/plans";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { useSession } from "next-auth/react";
@@ -86,8 +87,18 @@ export default function DateTimeSelection({
   // Check plan types
   const isSameDayBookingAllowed = plan && (
     plan.isSameDay === true || 
-    (plan.title && plan.title.toLowerCase().includes('same day session'))
+    (plan.title && plan.title.toLowerCase().includes('same day session')) ||
+    (plan.title && plan.title.toLowerCase().includes('single online therapy session')) ||
+    (plan.title && plan.title.toLowerCase().includes('single session'))
   );
+
+  // Debug plan object
+  console.log('Plan object for same-day detection:', {
+    plan,
+    planTitle: plan?.title,
+    planIsSameDay: plan?.isSameDay,
+    isSameDayBookingAllowed
+  });
 
   const isFiveMinutePlan = plan && (
     plan.isFiveMin === true ||
@@ -100,8 +111,8 @@ export default function DateTimeSelection({
     const response = await fetch('/api/patient/sessions');
     if(response.ok){
       const data = await response.json();
-      setBalance(data.balance.totalSessions);
-      setAvailableSessions(data.balance.totalSessions);
+      setBalance(data.balance.balanceAmount);
+      setAvailableSessions(data.balance.balanceAmount);
       setHistory(data.balance.history);
     }
   }
@@ -573,7 +584,7 @@ const generateDefaultTimeSlots = () => {
   };
 
   // Handle confirm button click
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (totalSessions === 1) {
       let dateTime: Date;
       
@@ -583,6 +594,27 @@ const generateDefaultTimeSlots = () => {
         const [hours, minutes] = selectedSlot.split(':');
         dateTime = new Date(selectedDate);
         dateTime.setHours(Number(hours), Number(minutes), 0, 0);
+  
+        // Check if this is a same-day booking
+        const isSameDaySlot = selectedDate && isSameDay(selectedDate, new Date());
+        
+        console.log('Same-day booking detection:', {
+          isSameDaySlot,
+          isSameDayBookingAllowed,
+          selectedDate: selectedDate?.toISOString(),
+          today: new Date().toISOString(),
+          plan: plan?.title,
+          planIsSameDay: plan?.isSameDay,
+          selectedSlot,
+          dateTime: dateTime?.toISOString()
+        });
+        
+        if (isSameDaySlot && isSameDayBookingAllowed) {
+          // Handle same-day booking with surcharge
+          console.log('Using same-day booking flow');
+          await handleSameDayBooking(dateTime);
+          return;
+        }
   
         // Convert to UTC using patient's timezone
         const utcDate = fromZonedTime(dateTime, patientTimeZone);
@@ -629,6 +661,53 @@ const generateDefaultTimeSlots = () => {
   
     setIsLoading(true);
     setShowFullPageLoading(true);
+  };
+
+  // Handle same-day booking with surcharge
+  const handleSameDayBooking = async (dateTime: Date) => {
+    if (!therapistId) {
+      toast.error("Therapist not found");
+      return;
+    }
+
+    setIsLoading(true);
+    setShowFullPageLoading(true);
+
+    try {
+      const response = await fetch('/api/patient/appointments/same-day-booking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selectedSlot: {
+            date: dateTime.toISOString(),
+            time: selectedSlot,
+            therapistId: therapistId
+          },
+          isReschedule: false,
+          useBalance: false // Stripe payment
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to create same-day appointment");
+      }
+
+      const data = await response.json();
+      
+      if (data.url) {
+        // Redirect to Stripe checkout
+        window.location.href = data.url;
+      } else {
+        throw new Error("No redirect URL provided in payment response");
+      }
+    } catch (error: any) {
+      console.error("Error creating same-day appointment:", error);
+      toast.error(error.message || "Failed to create same-day appointment");
+    } finally {
+      setIsLoading(false);
+      setShowFullPageLoading(false);
+    }
   };
   
 

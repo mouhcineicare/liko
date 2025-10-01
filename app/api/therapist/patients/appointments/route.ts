@@ -6,7 +6,7 @@ import Appointment from '@/lib/db/models/Appointment';
 import Balance from '@/lib/db/models/Balance';
 import Subscription from '@/lib/db/models/Subscription';
 
-const DEFAULT_BALANCE_RATE = 90;
+// Removed DEFAULT_BALANCE_RATE - now using direct AED amounts
 
 export async function GET(request: NextRequest) {
   try {
@@ -107,10 +107,8 @@ export async function GET(request: NextRequest) {
         let hasPositiveBalance = false;
         
         if (balance) {
-          const totalBalanceInAED = balance.totalSessions * DEFAULT_BALANCE_RATE;
-          const spentBalanceInAED = balance.spentSessions * DEFAULT_BALANCE_RATE;
-          const remainingBalanceInAED = totalBalanceInAED - spentBalanceInAED;
-          hasPositiveBalance = remainingBalanceInAED > 0;
+          // Use direct AED amount from the new balance system
+          hasPositiveBalance = balance.balanceAmount > 0;
         }
         
         return {

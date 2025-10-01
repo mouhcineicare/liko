@@ -115,7 +115,7 @@ export default function SessionsRebooking() {
       const response = await fetch('/api/patient/sessions');
       if (response.ok) {
         const data = await response.json();
-        setSessionBalance(data.balance.totalSessions);
+        setSessionBalance(data.balance.balanceAmount);
       }
     } catch (error) {
       console.error("Failed to fetch session balance", error);
@@ -208,17 +208,22 @@ export default function SessionsRebooking() {
         // Get patient's timezone (same as reschedule dialog)
         const patientTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
         
-        // Create Date object from the time string
-        const date = new Date(slot.start);
+        // Create Date object from the slot's start time
+        const slotDate = new Date(slot.start);
+        
+        // Validate the date
+        if (isNaN(slotDate.getTime())) {
+          throw new Error(`Invalid slot.start: ${slot.start}`);
+        }
         
         // Format local time (patient's timezone) - same as reschedule dialog
-        const localTime = format(toZonedTime(date, patientTimeZone), 'h:mm a');
+        const localTime = format(toZonedTime(slotDate, patientTimeZone), 'h:mm a');
         
         // Format UAE time - same as reschedule dialog
-        const uaeTime = format(toZonedTime(date, 'Asia/Dubai'), 'h:mm a');
+        const uaeTime = format(toZonedTime(slotDate, 'Asia/Dubai'), 'h:mm a');
         
-        // Use the same time format as reschedule dialog
-        const time = format(new Date(slot.start), "HH:mm");
+        // Use the slot's actual time for the time field
+        const time = format(toZonedTime(slotDate, patientTimeZone), "HH:mm");
         
         return {
           ...slot,
@@ -284,6 +289,14 @@ const handleRebookingTimeSelect = (day: string, time: string, date: string) => {
   // Check if this is a same-day booking
   const selectedDate = new Date(date);
   if (isSameDayBooking(selectedDate, time)) {
+    // Calculate same-day price with surcharge
+    const sameDayPrice = SAME_DAY_PRICING.BASE_PRICE * SAME_DAY_PRICING.SURCHARGE_MULTIPLIER;
+    setCalculatedPrice(sameDayPrice);
+    setOriginalPrice(sameDayPrice);
+    setDiscountMessage("Same-day booking with 64% surcharge");
+    setPriceDisplayColorClass("text-orange-600");
+    setSelectedSlotsColorClass("bg-orange-600");
+    
     setSelectedSameDaySlot({ day, time, date });
     setShowSameDayModal(true);
     return;
@@ -321,20 +334,25 @@ const handleRebookingTimeSelect = (day: string, time: string, date: string) => {
     }
     
     // Calculate price based on the new state immediately
-    calculatePriceAndDiscount(newTimes.length);
+    calculatePriceAndDiscount(newTimes);
     return newTimes;
   });
 };
 
-const calculatePriceAndDiscount = (numberOfSessions: number) => {
+const calculatePriceAndDiscount = (sessionsArray: SelectedSession[]) => {
   let price = 0;
   let original = 0;
   let message = "";
   let colorClass = "text-blue-600";
   let bgClass = "bg-blue-600";
 
+  console.log('🔍 PRICE CALCULATION DEBUG - calculatePriceAndDiscount called with:', {
+    sessionsArrayLength: sessionsArray.length,
+    sessionsArray: sessionsArray
+  });
+
   // Calculate price for each selected session
-  selectedRebookingTimes.forEach(session => {
+  sessionsArray.forEach(session => {
     const sessionDate = new Date(session.date);
     const isSameDay = isSameDayBooking(sessionDate, session.time);
     
@@ -351,20 +369,24 @@ const calculatePriceAndDiscount = (numberOfSessions: number) => {
     }
   });
 
-  // Apply bulk discounts
-  if (numberOfSessions >= 8) {
+  console.log('💰 PRICE CALCULATION DEBUG - Price before discounts:', { price, original, numberOfSessions: sessionsArray.length });
+
+  // Apply bulk discounts based on actual number of sessions
+  if (sessionsArray.length >= 8) {
     original = price;
     price *= (1 - EIGHT_SESSION_DISCOUNT_PERCENTAGE);
     message = "20% discount applied for 8+ sessions!";
     colorClass = "text-purple-600";
     bgClass = "bg-purple-600";
-  } else if (numberOfSessions >= 4) {
+  } else if (sessionsArray.length >= 4) {
     original = price;
     price *= (1 - FOUR_SESSION_DISCOUNT_PERCENTAGE);
     message = "10% discount applied for 4+ sessions!";
     colorClass = "text-orange-600";
     bgClass = "bg-orange-600";
   }
+
+  console.log('✅ PRICE CALCULATION DEBUG - Final calculated price:', { price, original, message });
 
   setCalculatedPrice(price);
   setOriginalPrice(original);
@@ -433,6 +455,11 @@ const handlePurchaseSessions = async (sessions: number) => {
       new Date(a.date).getTime() - new Date(b.date).getTime()
     );
 
+    // Debug: Log the selected sessions
+    console.log('🔍 DEBUG - Selected sessions:', sortedSessions);
+    console.log('🔍 DEBUG - First session:', sortedSessions[0]);
+    console.log('🔍 DEBUG - Recurring sessions:', sortedSessions.slice(1));
+
     // First appointment is the main one, others are recurring
     const [firstSession, ...recurringSessions] = sortedSessions;
 
@@ -443,16 +470,28 @@ const handlePurchaseSessions = async (sessions: number) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        date: firstSession.date,
+        date: (() => {
+          // Ensure time is in proper format (HH:MM)
+          const time = firstSession.time.includes(':') ? firstSession.time : `${firstSession.time.slice(0, 2)}:${firstSession.time.slice(2)}`;
+          const dateTime = new Date(`${firstSession.date}T${time}`);
+          console.log('🔍 DEBUG - Main session datetime:', { date: firstSession.date, time: firstSession.time, formattedTime: time, result: dateTime.toISOString() });
+          return dateTime.toISOString();
+        })(), // Combine date and time for main session
         localTimeZone: patientTimeZone,
         therapyType: 'individual', // Add required field
         price: calculatedPrice,
         plan: 'Single Online Therapy Session',
-        recurring: recurringSessions.map(session => ({ 
-          date: session.date, 
-          status: "in_progress", 
-          payment: "unpaid" 
-        })),
+        recurring: recurringSessions.map(session => {
+          // Combine date and time into a proper datetime string
+          const time = session.time.includes(':') ? session.time : `${session.time.slice(0, 2)}:${session.time.slice(2)}`;
+          const sessionDateTime = new Date(`${session.date}T${time}`);
+          console.log('🔍 DEBUG - Recurring session datetime:', { date: session.date, time: session.time, formattedTime: time, result: sessionDateTime.toISOString() });
+          return { 
+            date: sessionDateTime.toISOString(), // This will include both date and time
+            status: "in_progress", 
+            payment: "unpaid" 
+          };
+        }),
         discount: originalPrice - calculatedPrice,
         discountPercentage: selectedRebookingTimes.length >= 8 ? 20 : 
                          selectedRebookingTimes.length >= 4 ? 10 : 0,
@@ -505,7 +544,13 @@ const handleSameDayUseBalance = async () => {
   ]);
   
   // Recalculate price
-  calculatePriceAndDiscount(selectedRebookingTimes.length + 1);
+  const updatedTimes = [...selectedRebookingTimes, {
+    day: selectedSameDaySlot.day,
+    time: selectedSameDaySlot.time,
+    date: selectedSameDaySlot.date,
+    weekOffset
+  }];
+  calculatePriceAndDiscount(updatedTimes);
   
   setShowSameDayModal(false);
   setSelectedSameDaySlot(null);
@@ -562,60 +607,79 @@ const handlePayFully = async (daySlots: any[], totalPrice: number) => {
   setIsLoading(true);
   
   try {
-    // Create appointment directly with Stripe payment
-    const sortedSessions = [...daySlots].sort((a, b) => 
+    // Use ALL selected slots, not just current day's slots
+    const allSelectedSlots = selectedRebookingTimes;
+    const sortedSessions = [...allSelectedSlots].sort((a, b) => 
       new Date(a.date).getTime() - new Date(b.date).getTime()
     );
 
     const [firstSession, ...recurringSessions] = sortedSessions;
 
-    console.log('Frontend rebooking data:', {
-      totalSlots: daySlots.length,
+    console.log('🚀 PAYMENT DEBUG - Frontend rebooking data:', {
+      totalSlots: allSelectedSlots.length,
       firstSession,
       recurringSessions,
       recurringSessionsLength: recurringSessions.length,
-      totalPrice
+      totalPrice: calculatedPrice,
+      calculatedPriceType: typeof calculatedPrice
     });
 
     // Create the appointment first
-    console.log('Creating appointment with data:', {
-      date: firstSession.date,
+    console.log('📝 PAYMENT DEBUG - Creating appointment with data:', {
+      date: new Date(`${firstSession.date}T${firstSession.time}`).toISOString(),
       localTimeZone: patientTimeZone,
       therapyType: 'individual',
-      price: totalPrice,
+      price: calculatedPrice,
+      priceType: typeof calculatedPrice,
       plan: 'Purchased From Rebooking',
-      recurring: recurringSessions.map(session => ({ 
-        date: session.date, 
-        status: "in_progress", 
-        payment: "unpaid" 
-      })),
-      discount: 0,
-      discountPercentage: 0,
+      recurring: recurringSessions.map(session => {
+        // Combine date and time into a proper datetime string
+        const time = session.time.includes(':') ? session.time : `${session.time.slice(0, 2)}:${session.time.slice(2)}`;
+        const sessionDateTime = new Date(`${session.date}T${time}`);
+        return { 
+          date: sessionDateTime.toISOString(), // This will include both date and time
+          status: "in_progress", 
+          payment: "unpaid" 
+        };
+      }),
+      discount: originalPrice - calculatedPrice,
+      discountPercentage: selectedRebookingTimes.length >= 8 ? 20 : 
+                       selectedRebookingTimes.length >= 4 ? 10 : 0,
       isRebooking: true,
       paymentMethod: 'stripe'
     });
+
+    const appointmentData = {
+      date: new Date(`${firstSession.date}T${firstSession.time}`).toISOString(),
+      localTimeZone: patientTimeZone,
+      therapyType: 'individual',
+      price: calculatedPrice,
+      plan: 'Single Online Therapy Session',
+      recurring: recurringSessions.map(session => {
+        // Combine date and time into a proper datetime string
+        const time = session.time.includes(':') ? session.time : `${session.time.slice(0, 2)}:${session.time.slice(2)}`;
+        const sessionDateTime = new Date(`${session.date}T${time}`);
+        return { 
+          date: sessionDateTime.toISOString(), // This will include both date and time
+          status: "in_progress", 
+          payment: "unpaid" 
+        };
+      }),
+      discount: originalPrice - calculatedPrice,
+      discountPercentage: selectedRebookingTimes.length >= 8 ? 20 : 
+                       selectedRebookingTimes.length >= 4 ? 10 : 0,
+      isRebooking: true,
+      paymentMethod: 'stripe' // Flag to indicate Stripe payment
+    };
+
+    console.log('📤 PAYMENT DEBUG - Sending to /api/patient/sessions:', appointmentData);
 
     const appointmentResponse = await fetch('/api/patient/sessions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        date: firstSession.date,
-        localTimeZone: patientTimeZone,
-        therapyType: 'individual',
-        price: totalPrice,
-        plan: 'Single Online Therapy Session',
-        recurring: recurringSessions.map(session => ({ 
-          date: session.date, 
-          status: "in_progress", 
-          payment: "unpaid" 
-        })),
-        discount: 0,
-        discountPercentage: 0,
-        isRebooking: true,
-        paymentMethod: 'stripe' // Flag to indicate Stripe payment
-      }),
+      body: JSON.stringify(appointmentData)
     });
 
     console.log('Appointment creation response status:', appointmentResponse.status);
@@ -639,12 +703,17 @@ const handlePayFully = async (daySlots: any[], totalPrice: number) => {
     
     // Now redirect to Stripe checkout for payment
     console.log('Calling payment endpoint with appointment ID:', appointment.appointmentId);
+    
+    const paymentRequestData = {
+      appointmentId: appointment.appointmentId
+    };
+    
+    console.log('💳 PAYMENT DEBUG - Sending to /api/appointments/payment:', paymentRequestData);
+    
     const paymentResponse = await fetch('/api/appointments/payment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        appointmentId: appointment.appointmentId
-      }),
+      body: JSON.stringify(paymentRequestData)
     });
 
     console.log('Payment response status:', paymentResponse.status);
@@ -658,7 +727,7 @@ const handlePayFully = async (daySlots: any[], totalPrice: number) => {
     }
     
     const paymentData = await paymentResponse.json();
-    console.log('Payment response data:', paymentData);
+    console.log('💳 PAYMENT DEBUG - Payment response data:', paymentData);
     
     if (paymentData.redirectUrl) {
       window.location.href = paymentData.redirectUrl;
@@ -680,7 +749,9 @@ const handlePayUsingBalance = async (daySlots: any[], totalPrice: number, remain
     await handlePayFully(daySlots, remainingAmount);
   } else {
     // Use balance only - create appointment with balance payment
-    const sortedSessions = [...daySlots].sort((a, b) => 
+    // Use ALL selected slots, not just current day's slots
+    const allSelectedSlots = selectedRebookingTimes;
+    const sortedSessions = [...allSelectedSlots].sort((a, b) => 
       new Date(a.date).getTime() - new Date(b.date).getTime()
     );
 
@@ -693,18 +764,25 @@ const handlePayUsingBalance = async (daySlots: any[], totalPrice: number, remain
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        date: firstSession.date,
+        date: new Date(`${firstSession.date}T${firstSession.time}`).toISOString(),
         localTimeZone: patientTimeZone,
         therapyType: 'individual',
-        price: totalPrice,
+        price: calculatedPrice,
         plan: 'Single Online Therapy Session',
-        recurring: recurringSessions.map(session => ({ 
-          date: session.date, 
-          status: "in_progress", 
-          payment: "unpaid" 
-        })),
-        discount: 0,
-        discountPercentage: 0,
+        recurring: recurringSessions.map(session => {
+          // Combine date and time into a proper datetime string
+          const time = session.time.includes(':') ? session.time : `${session.time.slice(0, 2)}:${session.time.slice(2)}`;
+          const sessionDateTime = new Date(`${session.date}T${time}`);
+          console.log('🔍 DEBUG - Recurring session datetime:', { date: session.date, time: session.time, formattedTime: time, result: sessionDateTime.toISOString() });
+          return { 
+            date: sessionDateTime.toISOString(), // This will include both date and time
+            status: "in_progress", 
+            payment: "unpaid" 
+          };
+        }),
+        discount: originalPrice - calculatedPrice,
+        discountPercentage: selectedRebookingTimes.length >= 8 ? 20 : 
+                         selectedRebookingTimes.length >= 4 ? 10 : 0,
         isRebooking: true,
         paymentMethod: 'balance' // Use balance payment method
       }),
@@ -744,16 +822,22 @@ const handleDayBooking = async (daySlots: any[], totalPrice: number) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        date: firstSession.date,
+        date: new Date(`${firstSession.date}T${firstSession.time}`).toISOString(),
         localTimeZone: patientTimeZone,
         therapyType: 'individual',
         price: totalPrice,
         plan: 'Single Online Therapy Session',
-        recurring: recurringSessions.map(session => ({ 
-          date: session.date, 
-          status: "in_progress", 
-          payment: "unpaid" 
-        })),
+        recurring: recurringSessions.map(session => {
+          // Combine date and time into a proper datetime string
+          const time = session.time.includes(':') ? session.time : `${session.time.slice(0, 2)}:${session.time.slice(2)}`;
+          const sessionDateTime = new Date(`${session.date}T${time}`);
+          console.log('🔍 DEBUG - Recurring session datetime:', { date: session.date, time: session.time, formattedTime: time, result: sessionDateTime.toISOString() });
+          return { 
+            date: sessionDateTime.toISOString(), // This will include both date and time
+            status: "in_progress", 
+            payment: "unpaid" 
+          };
+        }),
         discount: 0, // No discount for single day booking
         discountPercentage: 0,
         isRebooking: true,
@@ -802,9 +886,9 @@ const handleDayBooking = async (daySlots: any[], totalPrice: number) => {
         </div>
         
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h4 className="font-medium text-blue-900 mb-2">Your Session Balance</h4>
+          <h4 className="font-medium text-blue-900 mb-2">Your Balance</h4>
           <div className="text-2xl font-bold text-blue-900">
-            {sessionBalance.toString().substring(0, 8)} AED remaining
+            {sessionBalance ? sessionBalance.toFixed(2) : '0.00'} AED remaining
           </div>
         </div>
       </Card>
@@ -960,7 +1044,7 @@ const handleDayBooking = async (daySlots: any[], totalPrice: number) => {
                     discountedTotal = totalSelectedPrice * (1 - discountPercent);
                   }
                   
-                  const remainingAmount = discountedTotal - sessionBalance;
+                  const remainingAmount = calculatedPrice - sessionBalance;
                   
                   const totalSelectedSlots = selectedRebookingTimes.length;
                   const remainingSlotsForDiscount = 4 - totalSelectedSlots;
@@ -985,15 +1069,15 @@ const handleDayBooking = async (daySlots: any[], totalPrice: number) => {
                       
                       <div className="flex flex-col sm:flex-row gap-2">
                         <button
-                          onClick={() => handlePayFully(daySlots, discountedTotal)}
+                          onClick={() => handlePayFully(daySlots, calculatedPrice)}
                           disabled={isLoading}
                           className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
                         >
-                          {isLoading ? 'Processing...' : `Pay Fully ${discountedTotal.toFixed(2)} AED`}
+                          {isLoading ? 'Processing...' : `Pay Fully ${calculatedPrice.toFixed(2)} AED`}
                         </button>
                         
                         <button
-                          onClick={() => handlePayUsingBalance(daySlots, discountedTotal, remainingAmount)}
+                          onClick={() => handlePayUsingBalance(daySlots, calculatedPrice, remainingAmount)}
                           disabled={isLoading}
                           className={`flex-1 px-4 py-2 rounded-lg font-medium transition-all ${
                             remainingAmount > 0
@@ -1024,7 +1108,7 @@ const handleDayBooking = async (daySlots: any[], totalPrice: number) => {
                           </p>
                           <p className="text-sm text-orange-700">
                             Your balance: {sessionBalance.toFixed(2)} AED • 
-                            Total cost: {discountedTotal.toFixed(2)} AED • 
+                            Total cost: {calculatedPrice.toFixed(2)} AED • 
                             Remaining: {remainingAmount.toFixed(2)} AED
                           </p>
                         </div>
@@ -1094,7 +1178,7 @@ const handleDayBooking = async (daySlots: any[], totalPrice: number) => {
             onClick={() => {
               const newTimes = selectedRebookingTimes.filter((_, i) => i !== index);
               setSelectedRebookingTimes(newTimes);
-              calculatePriceAndDiscount(newTimes.length);
+              calculatePriceAndDiscount(newTimes);
             }}
             className="text-red-600 hover:text-red-800"
           >

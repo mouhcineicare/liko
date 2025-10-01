@@ -52,22 +52,29 @@ export async function PUT(
       );
     }
 
+    // Check if patient already has a therapist before updating
+    const hasExistingTherapist = patient.therapy;
+    
     // Update patient's therapy assignment
     patient.therapy = therapistId;
     await patient.save();
 
-    // Update ALL non-completed appointments for this patient with the new therapist
+    // Update ALL non-completed, non-cancelled appointments for this patient with the new therapist
+    // If patient already has a therapist, new appointments should be confirmed
+    
     const updateResult = await Appointment.updateMany(
       {
         patient: appointment.patient,
-        status: { $ne: 'completed' } // All non-completed appointments
+        status: { $nin: ['completed', 'cancelled'] } // Exclude completed AND cancelled appointments
       },
       {
         $set: {
           therapist: new Types.ObjectId(therapistId.toString()),
           hasPreferedDate: false,
           isAccepted: false,
-          status: 'matched_pending_therapist_acceptance'
+          // When admin assigns therapist, patient is matched - all appointments should be confirmed
+          // This ensures patient can rebook even if first appointment was cancelled
+          status: 'confirmed'
         }
       }
     );

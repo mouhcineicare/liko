@@ -250,5 +250,5 @@ export const getStatusConfig = (status: string) => {
   };
 };
 
-// Feature flag for new transition system
-export const USE_NEW_TRANSITION_SYSTEM = process.env.USE_NEW_TRANSITION_SYSTEM === 'true';
+// New transition system is now always enabled
+export const USE_NEW_TRANSITION_SYSTEM = true;

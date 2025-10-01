@@ -42,6 +42,7 @@ import CancellationDialog from "./CancellationDialog";
 import FeedbackAlert from "./FeedbackAlert";
 import NotShownConfirmationPopup from "./NotShownConfirmationPopup";
 import SessionBalance from "./SessionBalance";
+import TherapistBanner from "./TherapistBanner";
 
 interface SessionObject {
   date: string;
@@ -78,6 +79,8 @@ interface Appointment {
   isBalance: true | null;
   isAccepted: boolean | null;
   paidAt?: string;
+  isPaid?: boolean;
+  verificationSource?: string;
   paymentHistory?: Array<{
     amount: number;
     currency: string;
@@ -641,6 +644,8 @@ const fetchAppointments = useCallback(async (loadMore = false, filterStatus = fi
       <div className="max-w-4xl mx-auto">
         <SessionBalance/>
 
+        <TherapistBanner className="mb-6" appointments={appointments} />
+
         <AppointmentStatusView />
 
         {matchStatus === 'matched' && (
@@ -866,7 +871,8 @@ const AppointmentCard = ({
     return !isBefore(now, twoHoursBefore);
   };
 
-  const isUnpaid = !appointment.isStripeVerified && !appointment.isBalance;
+  // Use only Stripe verification and isBalance flag - ignore paymentStatus
+  const isUnpaid = !((appointment.isStripeVerified === true) || (appointment.isBalance === true));
   const canShowPayButton = isUnpaid && !isAppointmentExpired(appointment.date);
 
   const handlePayNow = () => {
@@ -1060,6 +1066,12 @@ const AppointmentCard = ({
 
       {canShowPayButton && (
         <div className="mb-3">
+          <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded text-xs">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+              <span className="font-medium text-red-800">Payment Required</span>
+            </div>
+          </div>
           <Button
             onClick={handlePayNow}
             className="w-full gap-2 bg-red-600 hover:bg-red-700"
@@ -1071,7 +1083,7 @@ const AppointmentCard = ({
         </div>
       )}
 
-      {appointment.meetingLink && !isExpired && isPaid && !isCancelled && !isCompleted && (
+      {appointment.meetingLink && !isExpired && !isUnpaid && !isCancelled && !isCompleted && (
         <div className="mb-3">
           <Button
             onClick={() => handleJoinMeeting(appointment.meetingLink || '')}
@@ -1096,6 +1108,7 @@ const AppointmentCard = ({
           <Progress value={progress} className="h-2" />
         </div>
       )}
+
 
       {/* Payment Information */}
       {(appointment.paidAt || appointment.paymentHistory) && (

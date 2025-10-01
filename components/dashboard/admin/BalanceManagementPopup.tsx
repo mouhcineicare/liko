@@ -98,23 +98,14 @@ export default function BalanceManagementPopup({
   });
   const [showPaymentSearch, setShowPaymentSearch] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<string | null>(null);
-  const DEFAULT_BALANCE_RATE = 90;
-  const sessionsValue = Form.useWatch("sessions", form);
+  // Removed DEFAULT_BALANCE_RATE - now using direct AED amounts
   const selectedPlan = Form.useWatch("plan", form);
   const [price, setPrice] = useState<number | null>(null);
-  const [calculatedSessions, setCalculatedSessions] = useState<number | null>(null);
 
   const handlePriceChange = (value: number | null) => {
-  setPrice(value);
-  if (value !== null) {
-    const sessions = parseFloat((value / DEFAULT_BALANCE_RATE).toFixed(2));
-    setCalculatedSessions(sessions);
-    form.setFieldsValue({ sessions: sessions });
-  } else {
-    setCalculatedSessions(null);
-    form.setFieldsValue({ sessions: null });
-  }
-};
+    setPrice(value);
+    // Direct AED amount - no conversion needed
+  };
 
   useEffect(() => {
     if (visible) {
@@ -133,9 +124,8 @@ export default function BalanceManagementPopup({
     if (selectedPayment && action === 'add') {
       const payment = payments.find(p => p.id === selectedPayment);
       if (payment) {
-        const calculatedSessions = parseFloat(((payment.amount * 0.01) / DEFAULT_BALANCE_RATE).toFixed(2));
+        // Direct AED amount - no conversion needed
         form.setFieldsValue({
-          sessions: calculatedSessions,
           price: payment.amount * 0.01
         });
       }

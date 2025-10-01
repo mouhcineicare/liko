@@ -7,7 +7,7 @@ import Subscription from '@/lib/db/models/Subscription';
 import User from '@/lib/db/models/User';
 import stripe from '@/lib/stripe';
 
-const DEFAULT_BALANCE_RATE = 90;
+// Removed DEFAULT_BALANCE_RATE - now using direct AED amounts
 
 export async function GET(
   request: NextRequest,
@@ -101,14 +101,11 @@ export async function GET(
     };
 
     if (balance) {
-      const totalBalanceInAED = balance.totalSessions * DEFAULT_BALANCE_RATE;
-      const spentBalanceInAED = balance.spentSessions * DEFAULT_BALANCE_RATE;
-      const remainingBalanceInAED = totalBalanceInAED - spentBalanceInAED;
-      
+      // Use direct AED amount from the new balance system
       balanceInfo = {
-        totalSessions: balance.totalSessions,
-        remainingSessions: remainingBalanceInAED / DEFAULT_BALANCE_RATE,
-        balanceInAED: remainingBalanceInAED,
+        totalSessions: 0, // No longer using session-based system
+        remainingSessions: 0, // No longer using session-based system
+        balanceInAED: balance.balanceAmount,
         history: balance.history.filter((item: any) => item.plan && item.action === "added")
       };
     }

@@ -19,7 +19,7 @@ export default function BalanceStatus() {
         }
 
         const data = await response.json();
-        setBalance(data.balance.totalSessions);
+        setBalance(data.balance.balanceAmount);
       } catch (err) {
         console.error("Error fetching balance:", err);
         setError(err instanceof Error ? err.message : "Failed to load balance");

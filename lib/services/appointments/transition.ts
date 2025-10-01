@@ -59,6 +59,15 @@ export async function transitionAppointment(
     throw new Error("Cannot proceed to matching without completed payment");
   }
 
+  // CRITICAL: Prevent status changes for cancelled or completed appointments
+  if (from === APPOINTMENT_STATUSES.CANCELLED) {
+    throw new Error("Cannot change status of cancelled appointments");
+  }
+
+  if (from === APPOINTMENT_STATUSES.COMPLETED) {
+    throw new Error("Cannot change status of completed appointments");
+  }
+
   // Update the appointment
   appt.status = to;
   await appt.save();

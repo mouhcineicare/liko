@@ -16,6 +16,8 @@ interface Appointment {
   plan: string;
   isStripeVerified: boolean;
   isBalance: boolean;
+  isPaid?: boolean;
+  verificationSource?: string;
   therapist: {
     fullName: string;
     image: string;
@@ -58,12 +60,12 @@ export default function PaymentsPage() {
       
       setAppointments(fetchedAppointments);
       
-      // Separate paid and unpaid appointments based on Stripe verification
+      // Separate paid and unpaid appointments based on Stripe verification and isBalance only
       const paid = fetchedAppointments.filter((apt: Appointment) => 
-        apt.isStripeVerified || apt.isBalance
+        (apt.isStripeVerified === true) || (apt.isBalance === true)
       );
       const unpaid = fetchedAppointments.filter((apt: Appointment) => 
-        !apt.isStripeVerified && !apt.isBalance
+        !((apt.isStripeVerified === true) || (apt.isBalance === true))
       );
       
       setPaidAppointments(paid);

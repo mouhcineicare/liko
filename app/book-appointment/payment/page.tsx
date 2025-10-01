@@ -7,6 +7,29 @@ import { Button } from "@/components/ui/button";
 import { useSession } from "next-auth/react";
 import { CreditCard } from "lucide-react";
 
+// Helper function to format dates safely
+const formatDate = (date: Date) => {
+  try {
+    return date.toLocaleDateString();
+  } catch (error) {
+    // Fallback formatting if locale is not available
+    return new Intl.DateTimeFormat('en-US').format(date);
+  }
+};
+
+const formatTime = (date: Date) => {
+  try {
+    return date.toLocaleTimeString();
+  } catch (error) {
+    // Fallback formatting if locale is not available
+    return new Intl.DateTimeFormat('en-US', { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    }).format(date);
+  }
+};
+
 export default function PaymentPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -80,8 +103,8 @@ export default function PaymentPage() {
           <div className="mb-8 p-4 bg-blue-50 rounded-lg border border-blue-100">
             <h3 className="font-semibold text-blue-900">Appointment Details</h3>
             <div className="mt-2 text-base text-blue-800 space-y-1">
-              <p>Date: <span className="font-medium">{new Date(appointment.date).toLocaleDateString()}</span></p>
-              <p>Time: <span className="font-medium">{new Date(appointment.date).toLocaleTimeString()}</span></p>
+              <p>Date: <span className="font-medium">{formatDate(new Date(appointment.date))}</span></p>
+              <p>Time: <span className="font-medium">{formatTime(new Date(appointment.date))}</span></p>
               <p>Plan: <span className="font-medium">{appointment.plan}</span></p>
               <p className="mt-2 text-lg font-bold text-blue-700">
                 Amount: <img src="/assets/icons/AED.png" alt="AED" className="inline-block h-5 w-5 -mt-0.5" />

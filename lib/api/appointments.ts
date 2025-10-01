@@ -74,21 +74,47 @@ export async function getPatientAppointments(patientId: string) {
       const isUpcoming = appointmentDate >= now;
 
       // Prioritize explicit logic first, then fallback to date-based
+      console.log('Status mapping debug:', {
+        appointmentId: appointment._id,
+        originalStatus: appointment.status,
+        hasTherapist: !!appointment.therapist,
+        isAccepted: appointment.isAccepted,
+        isUpcoming
+      });
+      
       if (appointment.status === 'cancelled') {
         customStatus = 'cancelled';
+        console.log('Status mapping: cancelled');
       } else if (appointment.status === 'completed') {
         customStatus = 'completed';
+        console.log('Status mapping: completed');
+      } else if (appointment.status === 'confirmed' || appointment.status === 'rescheduled') {
+        // Respect confirmed status - this takes priority over therapist assignment logic
+        customStatus = 'confirmed';
+        console.log('Status mapping: confirmed');
+      } else if (appointment.status === 'matched_pending_therapist_acceptance') {
+        // Respect matched_pending_therapist_acceptance status
+        customStatus = 'matched_pending_therapist_acceptance';
+        console.log('Status mapping: matched_pending_therapist_acceptance');
       } else if (!appointment.therapist) {
         customStatus = 'pending_match';
+        console.log('Status mapping: pending_match (no therapist)');
       } else if (appointment.therapist && appointment.isAccepted === false) {
         customStatus = 'matched_pending_therapist_acceptance';
+        console.log('Status mapping: matched_pending_therapist_acceptance (therapist not accepted)');
       } else if (appointment.isAccepted === true && appointment.status === 'pending_scheduling') {
         customStatus = 'pending_scheduling';
-      } else if (appointment.status === 'confirmed' || appointment.status === 'rescheduled') {
-        customStatus = 'confirmed';
+        console.log('Status mapping: pending_scheduling');
       } else {
         customStatus = isUpcoming && appointment.status !== 'cancelled' ? 'upcoming' : 'past';
+        console.log('Status mapping: fallback to', customStatus);
       }
+      
+      console.log('Final status mapping result:', {
+        appointmentId: appointment._id,
+        originalStatus: appointment.status,
+        customStatus
+      });
 
       return {
         ...appointment.toObject(),
@@ -194,7 +220,34 @@ export async function createAppointment(appointmentData: CreateAppointmentData) 
   // Build recurring sessions array (including main date as first session)
   const allSessionDates = Array.isArray(appointmentData.recurring) ? [...appointmentData.recurring] : [];
   const recurringSessions: SessionObject[] = allSessionDates.map((entry: any) => {
-    const date = typeof entry === 'string' ? entry : entry?.date;
+    let date;
+    
+    if (typeof entry === 'string') {
+      // Simple date string from regular booking flow - add time from main appointment
+      const mainAppointmentTime = new Date(appointmentData.date);
+      const recurringDate = new Date(entry);
+      recurringDate.setHours(mainAppointmentTime.getHours());
+      recurringDate.setMinutes(mainAppointmentTime.getMinutes());
+      recurringDate.setSeconds(mainAppointmentTime.getSeconds());
+      date = recurringDate.toISOString();
+    } else if (entry?.date) {
+      // Object with date field - check if it already has time info
+      if (entry.date.includes('T') || entry.date.includes(' ')) {
+        // Already has time info (from rebooking flow)
+        date = entry.date;
+      } else {
+        // Only has date, need to add time (from regular booking flow)
+        const mainAppointmentTime = new Date(appointmentData.date);
+        const recurringDate = new Date(entry.date);
+        recurringDate.setHours(mainAppointmentTime.getHours());
+        recurringDate.setMinutes(mainAppointmentTime.getMinutes());
+        recurringDate.setSeconds(mainAppointmentTime.getSeconds());
+        date = recurringDate.toISOString();
+      }
+    } else {
+      date = entry;
+    }
+    
     return {
       date,
       status: (typeof entry === 'object' && entry?.status) ? entry.status : 'in_progress',
@@ -221,12 +274,12 @@ export async function createAppointment(appointmentData: CreateAppointmentData) 
     paymentStatus: appointmentData.paymentStatus || "pending",
     totalSessions,
     sessionCount: appointmentData.sessionCount || totalSessions,
-    sessionUnitsTotal: appointmentData.sessionUnitsTotal || (appointmentData.price / 90),
+    sessionUnitsTotal: appointmentData.sessionUnitsTotal || appointmentData.price,
     payment: appointmentData.payment || {
       method: 'stripe',
       sessionsPaidWithBalance: 0,
-      sessionsPaidWithStripe: appointmentData.price / 90,
-      unitPrice: 90,
+      sessionsPaidWithStripe: appointmentData.price,
+      unitPrice: appointmentData.price,
       currency: 'AED',
       useBalance: false,
       refundedUnitsFromBalance: 0,
@@ -251,11 +304,13 @@ export async function createAppointment(appointmentData: CreateAppointmentData) 
   });
   console.log('lib/api/appointments.ts - Status logic debug:', {
     providedStatus: appointmentData.status,
+    providedStatusType: typeof appointmentData.status,
     hasTherapist: !!appointmentData.therapist,
     isRebooking: appointmentData.isRebooking,
     finalStatus: appointmentObject.status,
     paymentStatus: appointmentObject.paymentStatus,
-    isConfirmed: appointmentObject.isConfirmed
+    isConfirmed: appointmentObject.isConfirmed,
+    statusLogic: `appointmentData.status (${appointmentData.status}) || (appointmentData.therapist ? "confirmed" : "pending_match")`
   });
 
   const appointment = new Appointment(appointmentObject);
@@ -264,6 +319,7 @@ export async function createAppointment(appointmentData: CreateAppointmentData) 
   await appointment.save();
   console.log('lib/api/appointments.ts - Appointment saved successfully');
   console.log('lib/api/appointments.ts - Saved appointment data:', JSON.stringify(appointment.toObject(), null, 2));
+  console.log('lib/api/appointments.ts - Saved appointment status:', appointment.status);
   console.log('=== lib/api/appointments.ts - createAppointment END ===');
   
   return appointment;

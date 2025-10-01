@@ -30,7 +30,7 @@ export async function POST(req: Request) {
       balance = new Balance({ user: userId });
     }
 
-    const DEFAULT_BALANCE_RATE = 90;
+    // Removed DEFAULT_BALANCE_RATE - now using direct AED amounts
 
     if (action === 'add') {
       // Verify payment or plan is provided
@@ -40,15 +40,15 @@ export async function POST(req: Request) {
         }, { status: 400 });
       }
 
-      // Remove the session validation against price
-      balance.totalSessions += parseFloat(sessions);
+      // Add AED amount directly to balance
+      balance.balanceAmount += parseFloat(price);
 
       const historyItem: any = {
         action: 'added',
-        sessions: parseFloat(sessions),
+        amount: parseFloat(price),
         admin: session.user.id,
         reason,
-        price,
+        plan: 'Manual Admin Addition',
         createdAt: new Date()
       };
 
@@ -67,7 +67,7 @@ export async function POST(req: Request) {
           amount: price,
           currency: payment.currency || 'AED',
           date: new Date(payment.created * 1000),
-          sessionsAdded: parseFloat(sessions),
+          amountAdded: parseFloat(price),
           receiptUrl: payment.receipt_url,
           paymentType: payment.object === 'checkout.session' ? 'checkout_session' : 
                       payment.object === 'payment_intent' ? 'payment_intent' :
@@ -77,19 +77,20 @@ export async function POST(req: Request) {
       }
 
     } else if (action === 'remove') {
-      if (balance.totalSessions < sessions) {
+      if (balance.balanceAmount < parseFloat(price)) {
         return NextResponse.json({
-          error: 'Cannot remove more sessions than available'
+          error: 'Cannot remove more than available balance'
         }, { status: 400 });
       }
 
-      balance.totalSessions -= parseFloat(sessions);
+      balance.balanceAmount -= parseFloat(price);
 
       balance.history.push({
         action: 'removed',
-        sessions: parseFloat(sessions),
+        amount: parseFloat(price),
         admin: session.user.id,
         reason,
+        plan: 'Manual Admin Removal',
         createdAt: new Date()
       });
 

@@ -255,8 +255,17 @@ export default function PaymentSuccessPage() {
             className="px-4 py-2 bg-blue-500 text-white rounded-md text-sm hover:bg-blue-700 transition-colors"
             disabled={isUpdating}
           >
-            {isUpdating ? "Processing..." : "Return to Home"}
+            {isUpdating ? "Processing..." : "Return to Dashboard"}
           </button>
+
+          {!isUpdating && (
+            <button
+              onClick={() => router.push("/dashboard/patient/sessions-rebooking")}
+              className="mt-3 px-4 py-2 bg-green-500 text-white rounded-md text-sm hover:bg-green-700 transition-colors block w-full"
+            >
+              Book More Sessions
+            </button>
+          )}
         </div>
       </div>
     );

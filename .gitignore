@@ -43,3 +43,6 @@ public/uploads/*
 .github/workflows/deploy.yml.enable-obfuscation
 .enable-obfuscation
 *.enable-obfuscation
+
+# Local Netlify folder
+.netlify

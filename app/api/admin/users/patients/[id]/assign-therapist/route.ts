@@ -48,6 +48,9 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: "Therapist not found" }, { status: 404 })
     }
 
+    // Check if patient already has a therapist before updating
+    const hasExistingTherapist = patient.therapy;
+    
     // Update patient's therapist
     const updatedPatient = await User.findByIdAndUpdate(
       patientId, 
@@ -59,10 +62,10 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ error: "Failed to update patient" }, { status: 500 })
     }
 
-    // Find all NON-COMPLETED appointments for this patient and update them
+    // Find all NON-COMPLETED, NON-CANCELLED appointments for this patient and update them
     const nonCompletedAppointments = await Appointment.find({
       patient: patientId,
-      status: { $ne: 'completed' } // All appointments that are NOT completed
+      status: { $nin: ['completed', 'cancelled'] } // Exclude completed AND cancelled appointments
     })
 
     if (nonCompletedAppointments.length > 0) {
@@ -76,7 +79,9 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
             therapist: therapistId,
             hasPreferedDate: false,
             isAccepted: false,
-            status: 'matched_pending_therapist_acceptance'
+            // When admin assigns therapist, patient is matched - all appointments should be confirmed
+            // This ensures patient can rebook even if first appointment was cancelled
+            status: 'confirmed'
           }
         }
       )

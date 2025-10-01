@@ -4,6 +4,7 @@ import connectDB from '@/lib/db/connect';
 import { authOptions } from '@/lib/auth/config';
 import Appointment from '@/lib/db/models/Appointment';
 import { verifyStripePayment } from '@/lib/stripe/verification';
+import { verifyAppointmentPayment } from '@/lib/services/payment-verification';
 
 export async function GET() {
   try {
@@ -17,10 +18,10 @@ export async function GET() {
     
     const userId = session.user.id;
     
-    // Find ALL active appointments/packages for this patient
+    // Find ALL active appointments/packages for this patient (including unpaid)
     const activeAppointments = await Appointment.find({ 
       patient: userId,
-      status: { $nin: ['cancelled', 'completed'] } // Exclude completed/cancelled
+      status: { $nin: ['cancelled', 'completed'] } // Exclude completed/cancelled, but include unpaid
     })
     .sort({ createdAt: -1 }) // Sort by creation date (newest first)
     .populate({
@@ -40,30 +41,19 @@ export async function GET() {
     const processedAppointments = await Promise.all(
       activeAppointments.map(async (appointment) => {
         try {
-          // Check if payment was already verified by webhook
-          const isWebhookVerified = appointment.isStripeVerified === true && appointment.paymentStatus === 'completed';
+          // Use centralized payment verification
+          const paymentVerification = await verifyAppointmentPayment(appointment);
           
-          let verification;
-          let finalPaymentStatus;
-          let finalIsStripeVerified;
-          
-          if (isWebhookVerified) {
-            // Payment was already verified by webhook, respect that decision
-            console.log(`Appointment ${appointment._id} already verified by webhook, using webhook status`);
-            finalPaymentStatus = appointment.paymentStatus;
-            finalIsStripeVerified = appointment.isStripeVerified;
-            verification = {
-              paymentStatus: appointment.paymentStatus,
-              subscriptionStatus: 'active',
-              isActive: true
-            };
-          } else {
-            // Payment not verified by webhook, verify with Stripe
-            console.log(`Appointment ${appointment._id} not verified by webhook, verifying with Stripe`);
-            verification = await verifyStripePayment(appointment.checkoutSessionId, appointment.paymentIntentId);
-            finalPaymentStatus = verification.paymentStatus === 'paid' ? 'completed' : verification.paymentStatus;
-            finalIsStripeVerified = verification.paymentStatus === 'paid';
-          }
+          console.log(`Appointment ${appointment._id} payment verification:`, {
+            isPaid: paymentVerification.isPaid,
+            paymentStatus: paymentVerification.paymentStatus,
+            isStripeVerified: paymentVerification.isStripeVerified,
+            isBalance: paymentVerification.isBalance,
+            verificationSource: paymentVerification.verificationSource,
+            originalIsStripeVerified: appointment.isStripeVerified,
+            originalIsBalance: appointment.isBalance,
+            originalPaymentStatus: appointment.paymentStatus
+          });
           
           // Map the appointment status to custom statuses
           let customStatus = '';
@@ -113,9 +103,9 @@ export async function GET() {
             customStatus: customStatus,
             isAccepted: appointment.isAccepted,
             isConfirmed: appointment.isConfirmed,
-            paymentStatus: finalPaymentStatus,
-            isStripeVerified: finalIsStripeVerified,
-            isSubscriptionActive: verification.paymentStatus === 'paid',
+            paymentStatus: paymentVerification.paymentStatus,
+            isStripeVerified: paymentVerification.isStripeVerified,
+            isSubscriptionActive: paymentVerification.isPaid,
             meetingLink: appointment.meetingLink,
             therapyType: appointment.therapyType,
             price: appointment.price,
@@ -123,8 +113,8 @@ export async function GET() {
             comment: appointment.comment,
             declineComment: appointment.declineComment,
             reason: appointment.reason,
-            subscriptionStatus: verification.subscriptionStatus,
-            isBalance: appointment.isBalance,
+            subscriptionStatus: paymentVerification.isPaid ? 'active' : 'none',
+            isBalance: paymentVerification.isBalance,
             recurring: appointment.recurring,
             createdAt: appointment.createdAt,
             paidAt: appointment.paidAt,

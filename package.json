@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "NODE_OPTIONS='--max-old-space-size=4048' next dev",
+    "dev": "NODE_OPTIONS='--max-old-space-size=8048' next dev",
     "build": "NEXT_PUBLIC_APP_VERSION=$npm_package_version next build",
     "start": "next start",
     "cron": "node ./lib/cron/runner.js",

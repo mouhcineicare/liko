@@ -6,6 +6,45 @@ import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { useSession, signIn } from "next-auth/react";
 
+// Helper function to format dates safely
+const formatDate = (date: Date) => {
+  try {
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+  } catch (error) {
+    // Fallback formatting if locale is not available
+    const options: Intl.DateTimeFormatOptions = { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    };
+    return new Intl.DateTimeFormat('en-US', options).format(date);
+  }
+};
+
+const formatTime = (date: Date) => {
+  try {
+    return date.toLocaleTimeString('en-US', { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    });
+  } catch (error) {
+    // Fallback formatting if locale is not available
+    const options: Intl.DateTimeFormatOptions = { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    };
+    return new Intl.DateTimeFormat('en-US', options).format(date);
+  }
+};
+
 export default function PaymentPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -164,19 +203,10 @@ export default function PaymentPage() {
                 <div className="mt-1 w-2 h-2 rounded-full bg-blue-500"></div>
                 <div className="flex-1">
                   <p className="font-medium text-gray-800">
-                    Session 1 - {new Date(appointment.date).toLocaleDateString('en-US', { 
-                      weekday: 'long', 
-                      year: 'numeric', 
-                      month: 'long', 
-                      day: 'numeric' 
-                    })}
+                    Session 1 - {formatDate(new Date(appointment.date))}
                   </p>
                   <p className="text-sm text-gray-600">
-                    at {new Date(appointment.date).toLocaleTimeString('en-US', { 
-                      hour: 'numeric', 
-                      minute: '2-digit',
-                      hour12: true 
-                    })}
+                    at {formatTime(new Date(appointment.date))}
                   </p>
                 </div>
               </div>
@@ -189,19 +219,10 @@ export default function PaymentPage() {
                       <div className="mt-1 w-2 h-2 rounded-full bg-gray-400"></div>
                       <div className="flex-1">
                         <p className="font-medium text-gray-800">
-                          Session {index + 2} - {new Date(session.date).toLocaleDateString('en-US', { 
-                            weekday: 'long', 
-                            year: 'numeric', 
-                            month: 'long', 
-                            day: 'numeric' 
-                          })}
+                          Session {index + 2} - {formatDate(new Date(session.date))}
                         </p>
                         <p className="text-sm text-gray-600">
-                          at {new Date(session.date).toLocaleTimeString('en-US', { 
-                            hour: 'numeric', 
-                            minute: '2-digit',
-                            hour12: true 
-                          })}
+                          at {formatTime(new Date(session.date))}
                         </p>
                       </div>
                     </div>

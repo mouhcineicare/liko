@@ -86,9 +86,9 @@ export async function POST(request: Request) {
 
     console.log('Processing renew_now for user:', userId, 'renewed from:', renewedFrom);
 
-    // Credit sessions to user's balance
-    const sessionsToAdd = getSessionsFromPlanType(matchingPlan.type);
-    console.log('Sessions to add:', sessionsToAdd);
+    // Credit amount to user's balance
+    const amountToAdd = matchingPlan.price;
+    console.log('Amount to add:', amountToAdd);
 
     let balance = await Balance.findOne({ user: userId });
     if (!balance) {
@@ -96,13 +96,13 @@ export async function POST(request: Request) {
     }
 
     // Update balance
-    balance.totalSessions += sessionsToAdd;
+    balance.balanceAmount += amountToAdd;
 
     // Record history
       balance.history.push({
         action: 'added',
-        sessions: sessionsToAdd,
-        plan: matchingPlan.title, // Use plan title instead of plan ID
+        amount: amountToAdd,
+        plan: matchingPlan.title,
         reason: `Renew Now - ${product.name}`,
         createdAt: new Date()
       });
@@ -114,13 +114,13 @@ export async function POST(request: Request) {
       currency: subscription.items.data[0].price.currency,
       date: new Date(),
       planId: matchingPlan._id,
-      sessionsAdded: sessionsToAdd,
+      amountAdded: amountToAdd,
       paymentType: 'renew_now',
       receiptUrl: `https://dashboard.stripe.com/subscriptions/${subscription.id}`
     });
 
     await balance.save();
-    console.log('Balance updated for user:', userId, 'new total sessions:', balance.totalSessions);
+    console.log('Balance updated for user:', userId, 'new balance amount:', balance.balanceAmount);
 
     // Create new subscription record
     const newSubscriptionRecord = new Subscription({

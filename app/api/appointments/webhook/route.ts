@@ -48,22 +48,31 @@ export async function POST(req: Request) {
     );
   }
 
-  const body = await req.text();
-  console.log('Raw body:', body);
-  const sig = req.headers.get("stripe-signature");
-
-  if (!sig) {
-    return NextResponse.json(
-      { error: "Missing stripe-signature header" },
-      { status: 400 }
-    );
-  }
-
-  let event: Stripe.Event;
-
   try {
-    event = stripe.webhooks.constructEvent(body, sig, endpointSecret);
-    console.log('Webhook event received:', event.type);
+    const body = await req.text();
+    const sig = req.headers.get("stripe-signature");
+
+    if (!sig) {
+      console.log('ERROR: No stripe signature found');
+      return NextResponse.json(
+        { error: "No stripe signature found" },
+        { status: 400 }
+      );
+    }
+
+    let event: Stripe.Event;
+
+    try {
+      event = stripe.webhooks.constructEvent(body, sig, endpointSecret);
+      console.log('Webhook event received:', event.type);
+    } catch (err) {
+      console.log('ERROR: Webhook signature verification failed');
+      console.error('Signature verification error:', err);
+      return NextResponse.json(
+        { error: "Webhook signature verification failed" },
+        { status: 400 }
+      );
+    }
 
     await connectDB();
 
@@ -92,175 +101,13 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ received: true }, { status: 200 });
-  } catch (err: any) {
-    console.error("Webhook handler failed:", err);
+  } catch (error) {
+    console.error('Webhook error:', error);
     return NextResponse.json(
-      { 
-        error: err.message,
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-      }, 
+      { error: "Webhook processing failed" },
       { status: 500 }
     );
   }
-}
-
-
-async function handleSubscriptionPayment(event: Stripe.Event) {
-  console.log('=== WEBHOOK: handleSubscriptionPayment START ===');
-  
-  const invoice = event.data.object as Stripe.Invoice & {
-    subscription: string;
-  };
-  
-  const subscriptionId = invoice.subscription;
-  
-  if (!subscriptionId) {
-    throw new Error('No subscription found on invoice');
-  }
-
-  console.log('Processing subscription payment for subscription ID:', subscriptionId);
-
-  // Retrieve the full subscription object with proper typing
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId) as unknown as Stripe.Subscription & {
-    current_period_start: number;
-    current_period_end: number;
-  };
-
-  const currentPeriodStart = subscription.current_period_start;
-  const currentPeriodEnd = subscription.current_period_end;
-
-  if (!currentPeriodStart || !currentPeriodEnd) {
-    throw new Error('Missing subscription period dates');
-  }
-
-  const userId = subscription.metadata?.userId;
-  const planId = subscription.metadata?.planId;
-
-  if (!userId || !planId) {
-    throw new Error('Missing user or plan ID in subscription metadata');
-  }
-
-  console.log('Subscription metadata:', { userId, planId });
-
-  // Update subscription record
-  await Subscription.findOneAndUpdate(
-    { stripeSubscriptionId: subscription.id },
-    {
-      user: new mongoose.Types.ObjectId(userId),
-      plan: new mongoose.Types.ObjectId(planId),
-      status: subscription.status,
-      currentPeriodStart: new Date(currentPeriodStart * 1000),
-      currentPeriodEnd: new Date(currentPeriodEnd * 1000),
-      cancelAtPeriodEnd: subscription.cancel_at_period_end || false,
-      price: invoice.amount_paid / 100, // Convert from cents
-    },
-    { upsert: true, new: true }
-  );
-
-  console.log(`Updated subscription ${subscription.id} for user ${userId}`);
-
-  // ADD THIS: Update balance with sessions
-  try {
-    console.log('Adding sessions to balance for subscription:', subscriptionId);
-    await subscriptionTopupBalance(subscriptionId);
-    console.log(`Balance updated successfully for subscription ${subscriptionId}`);
-  } catch (error) {
-    console.error('Failed to update balance for subscription:', error);
-    // Don't throw error - subscription record is already updated
-    // This ensures the subscription is tracked even if balance update fails
-  }
-
-  console.log('=== WEBHOOK: handleSubscriptionPayment END ===');
-}
-
-async function handleSubscriptionCreated(event: Stripe.Event) {
-  console.log('=== WEBHOOK: handleSubscriptionCreated START ===');
-  
-  const subscription = event.data.object as Stripe.Subscription;
-  const userId = subscription.metadata?.userId;
-  const planId = subscription.metadata?.planId;
-
-  if (!userId || !planId) {
-    console.error('Missing user or plan ID in subscription metadata');
-    return;
-  }
-
-  console.log('Creating subscription record for:', { userId, planId, subscriptionId: subscription.id });
-
-  try {
-    // Create subscription record
-    await Subscription.findOneAndUpdate(
-      { stripeSubscriptionId: subscription.id },
-      {
-        user: new mongoose.Types.ObjectId(userId),
-        plan: new mongoose.Types.ObjectId(planId),
-        status: subscription.status,
-        currentPeriodStart: new Date(subscription.current_period_start * 1000),
-        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-        cancelAtPeriodEnd: subscription.cancel_at_period_end || false,
-        price: subscription.items.data[0].price.unit_amount / 100,
-      },
-      { upsert: true, new: true }
-    );
-
-    console.log(`Created subscription record for ${subscription.id}`);
-  } catch (error) {
-    console.error('Error creating subscription record:', error);
-  }
-
-  console.log('=== WEBHOOK: handleSubscriptionCreated END ===');
-}
-
-async function handleSubscriptionUpdated(event: Stripe.Event) {
-  console.log('=== WEBHOOK: handleSubscriptionUpdated START ===');
-  
-  const subscription = event.data.object as Stripe.Subscription;
-  const userId = subscription.metadata?.userId;
-  const planId = subscription.metadata?.planId;
-
-  if (!userId || !planId) {
-    console.error('Missing user or plan ID in subscription metadata');
-    return;
-  }
-
-  console.log('Updating subscription record for:', { userId, planId, subscriptionId: subscription.id });
-
-  try {
-    // Update subscription record
-    await Subscription.findOneAndUpdate(
-      { stripeSubscriptionId: subscription.id },
-      {
-        user: new mongoose.Types.ObjectId(userId),
-        plan: new mongoose.Types.ObjectId(planId),
-        status: subscription.status,
-        currentPeriodStart: new Date(subscription.current_period_start * 1000),
-        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-        cancelAtPeriodEnd: subscription.cancel_at_period_end || false,
-        price: subscription.items.data[0].price.unit_amount / 100,
-      },
-      { upsert: true, new: true }
-    );
-
-    console.log(`Updated subscription record for ${subscription.id}`);
-  } catch (error) {
-    console.error('Error updating subscription record:', error);
-  }
-
-  console.log('=== WEBHOOK: handleSubscriptionUpdated END ===');
-}
-
-async function handleSubscriptionCancellation(event: Stripe.Event) {
-  const subscription = event.data.object as Stripe.Subscription;
-  
-  await Subscription.findOneAndUpdate(
-    { stripeSubscriptionId: subscription.id },
-    {
-      status: "canceled",
-      cancelAtPeriodEnd: false,
-    }
-  );
-
-  console.log(`Marked subscription ${subscription.id} as canceled`);
 }
 
 // Enhance the handleSuccessfulPayment function
@@ -280,6 +127,8 @@ async function handleSuccessfulPayment(event: Stripe.Event) {
     console.log('Checkout session completed');
     console.log('Session metadata:', session.metadata);
     console.log('Appointment ID from metadata:', appointmentId);
+    console.log('Session ID:', session.id);
+    console.log('Session payment status:', session.payment_status);
     
     // Check if this is a renew_now payment
     if (session.metadata?.type === 'renew_now') {
@@ -297,41 +146,33 @@ async function handleSuccessfulPayment(event: Stripe.Event) {
   else if (event.type === "payment_intent.succeeded") {
     paymentIntent = event.data.object as Stripe.PaymentIntent;
     
-    // Try to get session from payment intent
-    if (paymentIntent.metadata?.appointmentId) {
-      appointmentId = paymentIntent.metadata.appointmentId;
-    } else if (paymentIntent.latest_charge) {
-      // Fallback: retrieve session by expanding payment intent's latest_charge's payment_link if present (best effort)
-      try {
-        const pi = await stripe.paymentIntents.retrieve(paymentIntent.id, { expand: ['latest_charge', 'charges'] });
-        const charge = (pi as any).latest_charge || (pi as any).charges?.data?.[0];
-        if (charge && charge.checkout_session) {
-          session = await stripe.checkout.sessions.retrieve(charge.checkout_session as string);
-          appointmentId = session.metadata?.appointmentId;
-        }
-      } catch (e) {
-        console.warn('Could not resolve Checkout Session from payment_intent; proceeding with appointmentId-only linkage');
-      }
-    }
+    console.log('Payment intent succeeded');
+    console.log('Payment intent metadata:', paymentIntent.metadata);
+    appointmentId = paymentIntent.metadata?.appointmentId;
+    console.log('Appointment ID from payment intent metadata:', appointmentId);
   }
 
   if (!appointmentId) {
-    console.error('No appointmentId found in event chain');
-    console.log('Session metadata:', session?.metadata);
-    console.log('Payment intent metadata:', paymentIntent?.metadata);
+    console.log('ERROR: No appointment ID found in event metadata');
     return;
   }
-  
-  console.log('Found appointment ID:', appointmentId);
 
+  console.log('Processing payment for appointment:', appointmentId);
+
+  // Find the appointment
   const appointment = await Appointment.findById(appointmentId);
   if (!appointment) {
-    console.error('Appointment not found with ID:', appointmentId);
-    throw new Error('Appointment not found');
+    console.log('ERROR: Appointment not found:', appointmentId);
+    return;
   }
-  
-  console.log('Found appointment:', appointment._id);
-  console.log('Current appointment status:', appointment.status);
+
+  console.log('Found appointment:', {
+    id: appointment._id,
+    status: appointment.status,
+    paymentStatus: appointment.paymentStatus,
+    plan: appointment.plan
+  });
+
   console.log('Current payment status:', appointment.paymentStatus);
 
   // Only process if payment isn't already completed
@@ -348,9 +189,9 @@ async function handleSuccessfulPayment(event: Stripe.Event) {
       }
     }
 
-    // Check if this is a rebook session - preserve confirmed status
+    // Check if this is a rebook session - always set to confirmed for rebooking
     const isRebookSession = appointment.plan === 'Purchased From Rebooking' || appointment.plan === 'Single Online Therapy Session';
-    const statusToSet = isRebookSession && appointment.status === 'confirmed' ? 'confirmed' : 'pending_match';
+    const statusToSet = isRebookSession ? 'confirmed' : 'pending_match';
     
     console.log('Webhook status logic:', {
       isRebookSession,
@@ -359,9 +200,13 @@ async function handleSuccessfulPayment(event: Stripe.Event) {
     });
 
     // Update payment status and persist Stripe identifiers for auditing
+    console.log('=== WEBHOOK: Preparing update data ===');
+    console.log('Session ID for checkoutSessionId:', session?.id);
+    console.log('PaymentIntent ID for paymentIntentId:', paymentIntent?.id);
+    
     const updateData: any = {
       paymentStatus: "completed",
-      status: statusToSet, // Preserve confirmed status for rebooking
+      status: statusToSet, // Set correct status for rebooking sessions
       isStripeVerified: true, // Mark as Stripe verified to prevent auto-cancellation
       paidAt: new Date(),
       paymentMethod: "card",
@@ -407,10 +252,62 @@ async function handleSuccessfulPayment(event: Stripe.Event) {
     }
 
     await Appointment.findByIdAndUpdate(appointmentId, updateData);
+    
+    // Verify the update was successful
+    const updatedAppointment = await Appointment.findById(appointmentId);
+    console.log('=== WEBHOOK: Verification after update ===');
+    console.log('Updated appointment checkoutSessionId:', updatedAppointment?.checkoutSessionId);
+    console.log('Updated appointment paymentIntentId:', updatedAppointment?.paymentIntentId);
+    console.log('Updated appointment isStripeVerified:', updatedAppointment?.isStripeVerified);
+    console.log('Updated appointment status:', updatedAppointment?.status);
+    
+    // Update balance for rebooking sessions
+    if (isRebookSession) {
+      console.log('=== WEBHOOK: Updating balance for rebooking session ===');
+      const sessionsToAdd = appointment.sessionCount || (appointment.recurring ? appointment.recurring.length + 1 : 1);
+      console.log('Sessions to add to balance:', sessionsToAdd);
+      
+      const Balance = require('@/lib/db/models/Balance').default;
+      let balance = await Balance.findOne({ user: appointment.patient });
+      if (!balance) {
+        balance = new Balance({ user: appointment.patient });
+      }
+      
+      // Update balance
+      balance.totalSessions += sessionsToAdd;
+      
+      // Record history
+      balance.history.push({
+        action: 'added',
+        sessions: sessionsToAdd,
+        plan: appointment.plan,
+        reason: `Rebooking session purchase - ${sessionsToAdd} sessions`,
+        createdAt: new Date()
+      });
+      
+      // Record payment
+      balance.payments.push({
+        paymentId: session?.id || paymentIntent?.id,
+        amount: session?.amount_total ? session.amount_total / 100 : paymentIntent?.amount ? paymentIntent.amount / 100 : 0,
+        currency: session?.currency?.toUpperCase() || paymentIntent?.currency?.toUpperCase() || 'AED',
+        date: new Date(),
+        sessionsAdded: sessionsToAdd,
+        paymentType: 'rebooking_checkout',
+        receiptUrl: `https://dashboard.stripe.com/payments/${session?.id || paymentIntent?.id}`
+      });
+      
+      await balance.save();
+      console.log('Balance updated for rebooking session:', {
+        userId: appointment.patient,
+        sessionsAdded: sessionsToAdd,
+        newTotalSessions: balance.totalSessions
+      });
+    }
+    
     console.log('=== WEBHOOK: Payment completed successfully ===');
     console.log('Appointment ID:', appointmentId);
     console.log('Payment Status: completed');
-    console.log('Appointment Status: pending_match');
+    console.log('Appointment Status:', statusToSet);
     console.log('Stripe Verified: true');
     console.log('Updated appointment data:', updateData);
     console.log('=== WEBHOOK: Payment processing complete ===');
@@ -428,74 +325,247 @@ async function handleFailedPayment(event: Stripe.Event) {
     throw new Error('Appointment ID not found in payment intent metadata');
   }
 
-  const appointment = await Appointment.findById(appointmentId);
-  if (appointment) {
-    appointment.paymentStatus = "failed";
-    await appointment.save();
+  console.log('Payment failed for appointment:', appointmentId);
+
+  await Appointment.findByIdAndUpdate(appointmentId, {
+    paymentStatus: "failed",
+    status: "cancelled",
+    lastStatusChangeReason: "Payment failed",
+    lastStatusChangedAt: new Date(),
+    lastStatusChangedBy: "system"
+  });
+
+  console.log('Appointment cancelled due to payment failure');
+}
+
+async function handleSubscriptionPayment(event: Stripe.Event) {
+  console.log('=== WEBHOOK: handleSubscriptionPayment START ===');
+  
+  const invoice = event.data.object as Stripe.Invoice;
+  const subscriptionId = invoice.subscription as string;
+  
+  console.log('Processing subscription payment for subscription:', subscriptionId);
+  
+  try {
+    // Get the subscription from Stripe
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    console.log('Retrieved subscription:', {
+      id: subscription.id,
+      status: subscription.status,
+      customer: subscription.customer
+    });
+    
+    // Find the subscription in our database
+    const subscriptionRecord = await Subscription.findOne({ 
+      stripeSubscriptionId: subscriptionId 
+    });
+    
+    if (!subscriptionRecord) {
+      console.log('Subscription record not found in database:', subscriptionId);
+      return;
+    }
+    
+    console.log('Found subscription record:', {
+      id: subscriptionRecord._id,
+      user: subscriptionRecord.user,
+      plan: subscriptionRecord.plan
+    });
+    
+    // Update subscription status
+    await Subscription.findByIdAndUpdate(subscriptionRecord._id, {
+      status: subscription.status,
+      currentPeriodStart: new Date(subscription.current_period_start * 1000),
+      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+      cancelAtPeriodEnd: subscription.cancel_at_period_end || false
+    });
+    
+    console.log('Updated subscription record with new status:', subscription.status);
+    
+    // If this is a successful payment, add sessions to balance
+    if (subscription.status === 'active' && invoice.paid) {
+      console.log('Processing successful subscription payment');
+      
+      // Get the plan to determine sessions to add
+      const plan = await Plan.findById(subscriptionRecord.plan);
+      if (plan) {
+        const sessionsToAdd = getSessionsFromPlanType(plan.type);
+        console.log('Adding sessions to balance:', sessionsToAdd);
+        
+        // Update user balance
+        await subscriptionTopupBalance(subscriptionRecord.user.toString(), sessionsToAdd, plan.title);
+        
+        console.log('Successfully added sessions to user balance');
+      } else {
+        console.log('Plan not found for subscription:', subscriptionRecord.plan);
+      }
+    }
+    
+    console.log('=== WEBHOOK: handleSubscriptionPayment END ===');
+  } catch (error) {
+    console.error('Error processing subscription payment:', error);
+  }
+}
+
+async function handleSubscriptionCreated(event: Stripe.Event) {
+  console.log('=== WEBHOOK: handleSubscriptionCreated START ===');
+  
+  const subscription = event.data.object as Stripe.Subscription;
+  const customerId = subscription.customer as string;
+  
+  console.log('Processing subscription created for customer:', customerId);
+  
+  try {
+    // Find the user by Stripe customer ID
+    const user = await User.findOne({ stripeCustomerId: customerId });
+    if (!user) {
+      console.log('User not found for customer ID:', customerId);
+      return;
+    }
+    
+    console.log('Found user for subscription:', user._id);
+    
+    // Get the price ID from the subscription
+    const priceId = subscription.items.data[0].price.id;
+    console.log('Price ID from subscription:', priceId);
+    
+    // Find the plan by Stripe price ID
+    const plan = await Plan.findOne({ stripePriceId: priceId });
+    if (!plan) {
+      console.log('Plan not found for price ID:', priceId);
+      return;
+    }
+    
+    console.log('Found plan for subscription:', plan.title);
+    
+    // Create subscription record
+    const subscriptionRecord = new Subscription({
+      user: user._id,
+      plan: plan._id,
+      stripeSubscriptionId: subscription.id,
+      status: subscription.status,
+      currentPeriodStart: new Date(subscription.current_period_start * 1000),
+      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+      cancelAtPeriodEnd: subscription.cancel_at_period_end || false,
+      price: subscription.items.data[0].price.unit_amount / 100,
+    });
+    
+    await subscriptionRecord.save();
+    console.log('Created subscription record:', subscriptionRecord._id);
+    
+    console.log('=== WEBHOOK: handleSubscriptionCreated END ===');
+  } catch (error) {
+    console.error('Error processing subscription created:', error);
+  }
+}
+
+async function handleSubscriptionUpdated(event: Stripe.Event) {
+  console.log('=== WEBHOOK: handleSubscriptionUpdated START ===');
+  
+  const subscription = event.data.object as Stripe.Subscription;
+  
+  console.log('Processing subscription updated:', subscription.id);
+  
+  try {
+    // Update subscription record
+    await Subscription.findOneAndUpdate(
+      { stripeSubscriptionId: subscription.id },
+      {
+        status: subscription.status,
+        currentPeriodStart: new Date(subscription.current_period_start * 1000),
+        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+        cancelAtPeriodEnd: subscription.cancel_at_period_end || false
+      }
+    );
+    
+    console.log('Updated subscription record:', subscription.id);
+    console.log('=== WEBHOOK: handleSubscriptionUpdated END ===');
+  } catch (error) {
+    console.error('Error processing subscription updated:', error);
+  }
+}
+
+async function handleSubscriptionCancellation(event: Stripe.Event) {
+  console.log('=== WEBHOOK: handleSubscriptionCancellation START ===');
+  
+  const subscription = event.data.object as Stripe.Subscription;
+  
+  console.log('Processing subscription cancellation:', subscription.id);
+  
+  try {
+    // Update subscription record
+    await Subscription.findOneAndUpdate(
+      { stripeSubscriptionId: subscription.id },
+      {
+        status: 'canceled',
+        cancelAtPeriodEnd: false
+      }
+    );
+    
+    console.log('Updated subscription record for cancellation:', subscription.id);
+    console.log('=== WEBHOOK: handleSubscriptionCancellation END ===');
+  } catch (error) {
+    console.error('Error processing subscription cancellation:', error);
   }
 }
 
 async function handleRenewNowPayment(session: Stripe.Checkout.Session) {
   console.log('=== handleRenewNowPayment START ===');
-  console.log('Session ID:', session.id);
-  console.log('Session metadata:', session.metadata);
-
+  
   try {
-    // Get subscription details from Stripe
-    const subscription = await stripe.subscriptions.retrieve(session.subscription as string);
-    const productId = subscription.items.data[0].price.product;
-    const product = await stripe.products.retrieve(productId as string);
-
-    // Extract the actual plan name from Stripe product name
-    const planName = product.name.replace(/^Therapy Plan:\s*/, '');
-    console.log('Stripe product name:', product.name);
-    console.log('Extracted plan name:', planName);
-
-    // Find the matching plan in our database
+    // Get the product name from the session
+    const productName = session.metadata?.product_name;
+    if (!productName) {
+      console.error('No product name in session metadata');
+      return;
+    }
+    
+    console.log('Processing renew_now payment for product:', productName);
+    
+    // Find the matching plan
     const matchingPlan = await Plan.findOne({
-      title: planName,
+      title: productName,
       subscribtion: 'monthly'
     });
-
+    
     if (!matchingPlan) {
-      console.error('No matching plan found for renew_now:', planName);
+      console.error('No matching plan found for renew_now:', productName);
       const availablePlans = await Plan.find({ subscribtion: 'monthly' }).select('title type');
       console.log('Available monthly plans:', availablePlans.map(p => ({ title: p.title, type: p.type })));
-      throw new Error(`No matching plan found for product "${product.name}"`);
+      return;
     }
-
+    
     // Get user ID from metadata
     const userId = session.metadata?.userId;
     const renewedFrom = session.metadata?.renewedFrom;
-
+    
     if (!userId || !renewedFrom) {
       console.error('Missing required metadata for renew_now');
-      throw new Error('Missing required metadata for renew_now payment');
+      return;
     }
-
+    
     console.log('Processing renew_now for user:', userId, 'renewed from:', renewedFrom);
-
+    
     // Credit sessions to user's balance
     const sessionsToAdd = getSessionsFromPlanType(matchingPlan.type);
     console.log('Sessions to add:', sessionsToAdd);
-
+    
     let balance = await Balance.findOne({ user: userId });
     if (!balance) {
       balance = new Balance({ user: userId });
     }
-
+    
     // Update balance
     balance.totalSessions += sessionsToAdd;
-
+    
     // Record history
       balance.history.push({
         action: 'added',
         sessions: sessionsToAdd,
         plan: matchingPlan.title, // Use plan title instead of plan ID
-        reason: `Renew Now - ${product.name}`,
+        reason: `Renew Now - ${productName}`,
         createdAt: new Date()
       });
-
+    
     // Record payment
     balance.payments.push({
       paymentId: subscription.id,
@@ -507,10 +577,10 @@ async function handleRenewNowPayment(session: Stripe.Checkout.Session) {
       paymentType: 'renew_now',
       receiptUrl: `https://dashboard.stripe.com/subscriptions/${subscription.id}`
     });
-
+    
     await balance.save();
     console.log('Balance updated for user:', userId, 'new total sessions:', balance.totalSessions);
-
+    
     // Create new subscription record
     const newSubscriptionRecord = new Subscription({
       user: userId,
@@ -522,15 +592,15 @@ async function handleRenewNowPayment(session: Stripe.Checkout.Session) {
       cancelAtPeriodEnd: subscription.cancel_at_period_end || false,
       price: subscription.items.data[0].price.unit_amount / 100,
     });
-
+    
     await newSubscriptionRecord.save();
     console.log('New subscription record created:', newSubscriptionRecord._id);
-
+    
     // Cancel the old subscription at period end
     await stripe.subscriptions.update(renewedFrom, {
       cancel_at_period_end: true
     });
-
+    
     // Update old subscription record
     await Subscription.findOneAndUpdate(
       { stripeSubscriptionId: renewedFrom },
@@ -539,12 +609,10 @@ async function handleRenewNowPayment(session: Stripe.Checkout.Session) {
         status: 'canceled'
       }
     );
-
+    
     console.log(`Renew now completed: ${sessionsToAdd} sessions added to user ${userId}`);
     console.log('=== handleRenewNowPayment END ===');
-
   } catch (error) {
     console.error('Error in handleRenewNowPayment:', error);
-    throw error;
   }
 }

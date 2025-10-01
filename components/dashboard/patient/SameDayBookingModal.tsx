@@ -47,6 +47,12 @@ export default function SameDayBookingModal({
   };
 
   const handlePayNow = async () => {
+    console.log('SameDayBookingModal - Pay Full Amount clicked', {
+      selectedDate: selectedDate?.toISOString(),
+      selectedTime,
+      totalPrice,
+      isReschedule
+    });
     setIsProcessing(true);
     try {
       await onPayNow();

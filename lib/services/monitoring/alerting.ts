@@ -39,7 +39,7 @@ export class AlertingSystem {
       {
         id: 'new_system_inactive',
         name: 'New Transition System Inactive',
-        condition: (metrics) => !metrics.systemHealth.newSystemActive,
+        condition: (metrics: any) => !metrics?.systemHealth?.newSystemActive,
         severity: 'high',
         message: 'New transition system is not active - using legacy system',
         cooldownMinutes: 60
@@ -47,39 +47,39 @@ export class AlertingSystem {
       {
         id: 'legacy_statuses_found',
         name: 'Legacy Statuses Detected',
-        condition: (metrics) => metrics.systemHealth.legacyStatusesFound > 0,
+        condition: (metrics: any) => metrics?.systemHealth?.legacyStatusesFound > 0,
         severity: 'medium',
-        message: `Found ${metrics.systemHealth.legacyStatusesFound} appointments with legacy statuses`,
+        message: `Found ${metrics?.systemHealth?.legacyStatusesFound || 0} appointments with legacy statuses`,
         cooldownMinutes: 120
       },
       {
         id: 'invalid_transitions',
         name: 'Invalid Transitions Detected',
-        condition: (metrics) => metrics.systemHealth.invalidTransitions > 0,
+        condition: (metrics: any) => metrics?.systemHealth?.invalidTransitions > 0,
         severity: 'high',
-        message: `Found ${metrics.systemHealth.invalidTransitions} appointments with invalid transitions`,
+        message: `Found ${metrics?.systemHealth?.invalidTransitions || 0} appointments with invalid transitions`,
         cooldownMinutes: 30
       },
       {
         id: 'missing_required_fields',
         name: 'Missing Required Fields',
-        condition: (metrics) => metrics.systemHealth.missingRequiredFields > 0,
+        condition: (metrics: any) => metrics?.systemHealth?.missingRequiredFields > 0,
         severity: 'critical',
-        message: `Found ${metrics.systemHealth.missingRequiredFields} appointments with missing required fields`,
+        message: `Found ${metrics?.systemHealth?.missingRequiredFields || 0} appointments with missing required fields`,
         cooldownMinutes: 15
       },
       {
         id: 'high_error_rate',
         name: 'High Error Rate',
-        condition: (metrics) => metrics.last24Hours.errorRate > 5,
+        condition: (metrics: any) => metrics?.last24Hours?.errorRate > 5,
         severity: 'high',
-        message: `High error rate: ${metrics.last24Hours.errorRate.toFixed(2)}%`,
+        message: `High error rate: ${metrics?.last24Hours?.errorRate?.toFixed(2) || 0}%`,
         cooldownMinutes: 30
       },
       {
         id: 'no_recent_transitions',
         name: 'No Recent Transitions',
-        condition: (metrics) => metrics.last24Hours.transitions === 0,
+        condition: (metrics: any) => metrics?.last24Hours?.transitions === 0,
         severity: 'medium',
         message: 'No transitions in last 24 hours - system may not be active',
         cooldownMinutes: 240
@@ -87,9 +87,9 @@ export class AlertingSystem {
       {
         id: 'low_transition_volume',
         name: 'Low Transition Volume',
-        condition: (metrics) => metrics.last24Hours.transitions < 5 && metrics.last24Hours.transitions > 0,
+        condition: (metrics: any) => (metrics?.last24Hours?.transitions || 0) < 5 && (metrics?.last24Hours?.transitions || 0) > 0,
         severity: 'low',
-        message: `Low transition volume: ${metrics.last24Hours.transitions} transitions in 24h`,
+        message: `Low transition volume: ${metrics?.last24Hours?.transitions || 0} transitions in 24h`,
         cooldownMinutes: 480
       }
     ];

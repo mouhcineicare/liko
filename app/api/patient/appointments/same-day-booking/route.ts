@@ -46,25 +46,34 @@ export async function POST(req: Request) {
 
     const totalPrice = SAME_DAY_PRICING.BASE_PRICE * SAME_DAY_PRICING.SURCHARGE_MULTIPLIER;
     const surcharge = totalPrice - SAME_DAY_PRICING.BASE_PRICE;
+    
+    console.log('Same-day booking API called:', {
+      useBalance,
+      isReschedule,
+      appointmentId,
+      totalPrice,
+      surcharge,
+      basePrice: SAME_DAY_PRICING.BASE_PRICE,
+      surchargeMultiplier: SAME_DAY_PRICING.SURCHARGE_MULTIPLIER
+    });
 
     if (useBalance) {
-      // Check if user has sufficient balance for the surcharge amount
+      // Check if user has sufficient balance for the total amount
       const balance = await Balance.findOne({ user: user._id });
-      const surchargeSessions = surcharge / SAME_DAY_PRICING.BASE_PRICE; // Convert surcharge to sessions
       
-      if (!balance || balance.totalSessions < surchargeSessions) {
+      if (!balance || balance.balanceAmount < totalPrice) {
         return NextResponse.json(
-          { error: "Insufficient session balance for surcharge" },
+          { error: `Insufficient balance. You need ${totalPrice} AED but have ${balance?.balanceAmount || 0} AED` },
           { status: 400 }
         );
       }
 
-      // Deduct surcharge amount from balance
-      balance.totalSessions -= surchargeSessions;
+      // Deduct total amount from balance
+      balance.balanceAmount -= totalPrice;
       balance.history.push({
         action: 'used',
-        sessions: surchargeSessions,
-        description: `Same-day reschedule surcharge (${surcharge} AED)`,
+        amount: totalPrice,
+        description: `Same-day booking (${totalPrice} AED total - ${surcharge} AED surcharge)`,
         createdAt: new Date(),
         appointmentId: appointmentId || 'new',
         surcharge: surcharge
@@ -82,6 +91,7 @@ export async function POST(req: Request) {
         appointment.date = new Date(newDate);
         appointment.isSameDayBooking = true;
         appointment.sameDaySurcharge = surcharge;
+        appointment.price = totalPrice;
         appointment.status = 'confirmed';
         await appointment.save();
 
@@ -99,6 +109,7 @@ export async function POST(req: Request) {
           status: 'confirmed',
           isSameDayBooking: true,
           sameDaySurcharge: surcharge,
+          price: totalPrice,
           isStripeVerified: true,
           payment: 'paid'
         });
@@ -124,6 +135,14 @@ export async function POST(req: Request) {
       } else {
         customer = await stripe.customers.retrieve(user.stripeCustomerId) as Stripe.Customer;
       }
+
+      console.log('Creating Stripe checkout session for same-day booking:', {
+        totalPrice,
+        surcharge,
+        unitAmount: Math.round(totalPrice * 100),
+        isReschedule,
+        appointmentId
+      });
 
       const stripeSession = await stripe.checkout.sessions.create({
         payment_method_types: ["card"],

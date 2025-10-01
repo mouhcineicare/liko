@@ -96,20 +96,29 @@ export async function PUT(req: Request) {
     const { updateAppointmentStatus } = await import("@/lib/services/appointments/legacy-wrapper");
     const { APPOINTMENT_STATUSES } = await import("@/lib/utils/statusMapping");
 
-    // Transition to rescheduled status using new system
+    // Determine the correct status for reschedule
+    let targetStatus = APPOINTMENT_STATUSES.RESCHEDULED;
+    
+    // If it's a same-day reschedule with pending payment, keep as CONFIRMED until payment
+    if (isSameDayReschedule && appointmentData.paymentStatus === "pending") {
+      targetStatus = APPOINTMENT_STATUSES.CONFIRMED;
+    }
+
+    // Transition to appropriate status using new system
     const actor = { id: session.user.id, role: 'patient' as const };
     const finalAppointment = await updateAppointmentStatus(
       appointmentId,
-      APPOINTMENT_STATUSES.RESCHEDULED,
+      targetStatus,
       actor,
       { 
-        reason: 'Appointment rescheduled by patient',
+        reason: `Appointment rescheduled by patient${isSameDayReschedule ? ' (same-day with surcharge)' : ''}`,
         meta: { 
           originalDate: appointment.date,
           newDate: newDate,
           sessionIndex,
           isSameDayReschedule,
-          surchargeAmount
+          surchargeAmount,
+          paymentStatus: appointmentData.paymentStatus
         }
       }
     );

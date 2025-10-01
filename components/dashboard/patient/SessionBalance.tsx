@@ -38,7 +38,7 @@ const safeDate = (value: any): Date | null => {
 
 interface SessionData {
   balance: {
-    totalSessions: number;
+    balanceAmount: number;
     history: Array<{
       _id: string;
       action: string;
@@ -110,7 +110,7 @@ export default function SessionBalance() {
         // Safely validate session data
         const validatedSessionData: SessionData = {
           balance: {
-            totalSessions: safeNumber(sessionsData?.balance?.totalSessions, 0),
+            balanceAmount: safeNumber(sessionsData?.balance?.balanceAmount, 0),
             history: safeArray(sessionsData?.balance?.history).map(item => ({
               _id: safeString(item._id, ''),
               action: safeString(item.action, ''),
@@ -355,7 +355,7 @@ export default function SessionBalance() {
     );
   }
 
-  const sessionBalance = safeNumber(sessionData?.balance?.totalSessions, 0);
+  const sessionBalance = safeNumber(sessionData?.balance?.balanceAmount, 0);
 
   return (
     <>

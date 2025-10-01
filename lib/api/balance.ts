@@ -4,22 +4,7 @@ import Plan from '@/lib/db/models/Plan';
 import stripe from '@/lib/stripe';
 import connectDB from '../db/connect';
 
-function getSessionsFromPlanType(planType: string): number {
-  switch (planType) {
-    case 'x2_sessions': return 2;
-    case 'x3_sessions': return 3;
-    case 'x4_sessions': return 4;
-    case 'x5_sessions': return 5;
-    case 'x6_sessions': return 6;
-    case 'x7_sessions': return 7;
-    case 'x8_sessions': return 8;
-    case 'x9_sessions': return 9;
-    case 'x10_sessions': return 10;
-    case 'x11_sessions': return 11;
-    case 'x12_sessions': return 12;
-    default: return 1; // Fallback to single session
-  }
-}
+// This function is no longer needed - we'll use the plan price directly
 
 export async function subscriptionTopupBalance(subscriptionId: string) {
   await connectDB();
@@ -42,8 +27,8 @@ export async function subscriptionTopupBalance(subscriptionId: string) {
       throw new Error(`No matching plan found for product "${product.name}"`);
     }
 
-    // 4. Get session count using the safer switch approach
-    const sessionsToAdd = getSessionsFromPlanType(matchingPlan.type);
+    // 4. Get the amount to add to balance (plan price in AED)
+    const amountToAdd = matchingPlan.price;
 
     // 5. Find local subscription and user
     const subscription = await Subscription.findOne({ 
@@ -61,13 +46,13 @@ export async function subscriptionTopupBalance(subscriptionId: string) {
     }
 
     // 7. Update balance
-    balance.totalSessions += sessionsToAdd;
+    balance.balanceAmount += amountToAdd;
 
     // 8. Record history
     balance.history.push({
       action: 'added',
-      sessions: sessionsToAdd,
-      plan: matchingPlan.title, // Use plan title instead of plan ID
+      amount: amountToAdd,
+      plan: matchingPlan.title,
       reason: `Subscription renewal - ${product.name}`,
       createdAt: new Date()
     });
@@ -79,7 +64,7 @@ export async function subscriptionTopupBalance(subscriptionId: string) {
       currency: stripeSubscription.items.data[0].price.currency,
       date: new Date(),
       planId: matchingPlan._id,
-      sessionsAdded: sessionsToAdd,
+      amountAdded: amountToAdd,
       paymentType: 'subscription',
       receiptUrl: `https://dashboard.stripe.com/subscriptions/${subscriptionId}`
     });
@@ -98,9 +83,9 @@ export async function subscriptionTopupBalance(subscriptionId: string) {
 
     return {
       success: true,
-      sessionsAdded: sessionsToAdd,
-      newBalance: balance.totalSessions,
-      message: `Added ${sessionsToAdd} sessions from ${product.name} subscription`
+      amountAdded: amountToAdd,
+      newBalance: balance.balanceAmount,
+      message: `Added ${amountToAdd} AED from ${product.name} subscription`
     };
 
   } catch (error) {

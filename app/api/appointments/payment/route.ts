@@ -13,6 +13,45 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2020-08-27" as any,
 });
 
+// Helper function to format dates safely
+const formatDate = (date: Date) => {
+  try {
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      month: 'short', 
+      day: 'numeric',
+      year: 'numeric'
+    });
+  } catch (error) {
+    // Fallback formatting if locale is not available
+    const options: Intl.DateTimeFormatOptions = { 
+      weekday: 'long', 
+      month: 'short', 
+      day: 'numeric',
+      year: 'numeric'
+    };
+    return new Intl.DateTimeFormat('en-US', options).format(date);
+  }
+};
+
+const formatTime = (date: Date) => {
+  try {
+    return date.toLocaleTimeString('en-US', { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    });
+  } catch (error) {
+    // Fallback formatting if locale is not available
+    const options: Intl.DateTimeFormatOptions = { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    };
+    return new Intl.DateTimeFormat('en-US', options).format(date);
+  }
+};
+
 // Use localhost for development, production URL for production
 const baseUrl = process.env.NODE_ENV === 'development' 
   ? 'http://localhost:3000' 
@@ -76,6 +115,18 @@ export async function POST(req: Request) {
     }
 
     console.log('app/api/appointments/payment/route.ts - Found appointment:', JSON.stringify(appointment.toObject(), null, 2));
+    console.log('app/api/appointments/payment/route.ts - Appointment recurring sessions:', {
+      recurring: appointment.recurring,
+      recurringLength: appointment.recurring ? appointment.recurring.length : 0,
+      sessionCount: appointment.sessionCount,
+      totalSessions: appointment.totalSessions,
+      plan: appointment.plan
+    });
+    console.log('app/api/appointments/payment/route.ts - PRICE DEBUGGING:', {
+      appointmentPrice: appointment.price,
+      appointmentPriceType: typeof appointment.price,
+      appointmentPriceValue: appointment.price
+    });
 
     if (appointment.price === 0) {
       console.log('app/api/appointments/payment/route.ts - Processing free appointment (price = 0)');
@@ -124,19 +175,58 @@ export async function POST(req: Request) {
     }
     
     // Handle rebooking appointments - create a dynamic plan if needed
-    if (!plan && (appointment.plan === 'Purchased From Rebooking' || appointment.plan === 'Single Online Therapy Session')) {
-      console.log('app/api/appointments/payment/route.ts - Creating dynamic plan for rebooking appointment');
-      // Create a dynamic plan for rebooking appointments
-      plan = {
-        _id: 'rebooking-plan',
-        title: appointment.plan,
-        type: 'single_session',
-        price: appointment.price,
-        subscribtion: 'one_time', // Changed from 'single' to 'one_time' for one-time payment
-        therapyType: appointment.therapyType || 'individual',
-        description: 'Rebooking session purchase'
-      } as any;
-    }
+      if (!plan && (appointment.plan === 'Purchased From Rebooking' || appointment.plan === 'Single Online Therapy Session')) {
+        console.log('app/api/appointments/payment/route.ts - Creating dynamic plan for rebooking appointment');
+        console.log('Dynamic plan appointment data:', {
+          plan: appointment.plan,
+          recurring: appointment.recurring,
+          recurringLength: appointment.recurring ? appointment.recurring.length : 0,
+          sessionCount: appointment.sessionCount,
+          totalSessions: appointment.totalSessions,
+          date: appointment.date
+        });
+        console.log('app/api/appointments/payment/route.ts - DEBUGGING: Full appointment object:', JSON.stringify(appointment.toObject(), null, 2));
+        console.log('app/api/appointments/payment/route.ts - Plan found before dynamic creation:', !!plan);
+        console.log('app/api/appointments/payment/route.ts - Appointment plan check:', {
+          isPurchasedFromRebooking: appointment.plan === 'Purchased From Rebooking',
+          isSingleOnlineTherapy: appointment.plan === 'Single Online Therapy Session'
+        });
+        
+        // Generate dynamic description for recurring sessions
+        let dynamicDescription = 'Rebooking session purchase';
+        if (appointment.recurring && appointment.recurring.length > 0) {
+          const sessionCount = appointment.sessionCount || (appointment.recurring.length + 1);
+          const mainSessionDate = formatDate(new Date(appointment.date));
+          const mainSessionTime = formatTime(new Date(appointment.date));
+          
+          dynamicDescription = `Session 1: ${mainSessionDate} at ${mainSessionTime}`;
+          
+          appointment.recurring.forEach((session: any, index: number) => {
+            const sessionDate = formatDate(new Date(session.date));
+            const sessionTime = formatTime(new Date(session.date));
+            dynamicDescription += `\nSession ${index + 2}: ${sessionDate} at ${sessionTime}`;
+          });
+        }
+        
+        // Create a dynamic plan for rebooking appointments
+        plan = {
+          _id: 'rebooking-plan',
+          title: appointment.recurring && appointment.recurring.length > 0 
+            ? `Recurring Therapy Sessions - ${appointment.sessionCount || (appointment.recurring.length + 1)} Sessions Package`
+            : appointment.plan,
+          type: 'single_session',
+          price: appointment.price,
+          subscribtion: 'one_time', // Changed from 'single' to 'one_time' for one-time payment
+          therapyType: appointment.therapyType || 'individual',
+          description: dynamicDescription
+        } as any;
+        
+        console.log('app/api/appointments/payment/route.ts - Created dynamic plan:', {
+          title: plan.title,
+          description: plan.description,
+          hasRecurring: appointment.recurring && appointment.recurring.length > 0
+        });
+      }
     
     if (!plan) {
       console.log('app/api/appointments/payment/route.ts - Error: Plan not found for title:', appointment.plan, 'or type:', appointment.planType);
@@ -186,9 +276,9 @@ export async function POST(req: Request) {
       metadata: customer.metadata
     }, null, 2));
 
-    // Handle subscription payments
-    if (plan.subscribtion === 'monthly') {
-      console.log('app/api/appointments/payment/route.ts - Processing subscription payment');
+    // Handle subscription payments OR rebooking sessions
+    if (plan.subscribtion === 'monthly' || (appointment.plan === 'Purchased From Rebooking' || appointment.plan === 'Single Online Therapy Session')) {
+      console.log('app/api/appointments/payment/route.ts - Processing subscription payment or rebooking session');
       
       // Create or retrieve product
       if (!plan.stripeProductId) {
@@ -245,6 +335,55 @@ export async function POST(req: Request) {
           totalSessions: appointment.totalSessions,
           date: appointment.date
         });
+        console.log('app/api/appointments/payment/route.ts - Creating Stripe checkout with plan:', {
+          planTitle: plan.title,
+          planDescription: plan.description,
+          appointmentRecurring: appointment.recurring,
+          appointmentRecurringLength: appointment.recurring ? appointment.recurring.length : 0
+        });
+        console.log('app/api/appointments/payment/route.ts - DEBUGGING: Stripe checkout product data will be:', {
+          name: appointment.recurring && appointment.recurring.length > 0 
+            ? `Recurring Therapy Sessions - ${appointment.sessionCount || (appointment.recurring.length + 1)} Sessions Package`
+            : plan.title,
+          description: (() => {
+            if (appointment.recurring && appointment.recurring.length > 0) {
+              // Debug: Log session times for checkout
+              console.log('Checkout session times - main:', appointment.date);
+              console.log('Checkout session times - recurring:', appointment.recurring?.map(r=>r.date));
+              
+              // Validate and format main session
+              const mainDate = new Date(appointment.date);
+              if (isNaN(mainDate.getTime())) {
+                console.error('Invalid main appointment date:', appointment.date);
+                return plan.description || 'Rebooking session purchase';
+              }
+              const mainSessionDate = formatDate(mainDate);
+              const mainSessionTime = formatTime(mainDate);
+              
+              let description = `Session 1: ${mainSessionDate} at ${mainSessionTime}`;
+              
+              // Use individual session times for recurring sessions
+              appointment.recurring.forEach((session: any, index: number) => {
+                const sessionDate = new Date(session.date);
+                if (isNaN(sessionDate.getTime())) {
+                  console.error(`Invalid recurring session date for session ${index + 2}:`, session.date);
+                  return; // Skip invalid dates
+                }
+                const formattedSessionDate = formatDate(sessionDate);
+                const formattedSessionTime = formatTime(sessionDate);
+                description += `\nSession ${index + 2}: ${formattedSessionDate} at ${formattedSessionTime}`;
+              });
+              
+              return description;
+            } else {
+              return plan.description || 'Rebooking session purchase';
+            }
+          })(),
+          unitAmount: Math.round(appointment.price * 100),
+          planPrice: plan.price,
+          appointmentPrice: appointment.price
+        });
+        
         const session = await stripe.checkout.sessions.create({
           payment_method_types: ["card"],
           line_items: [{
@@ -256,32 +395,14 @@ export async function POST(req: Request) {
                   : plan.title,
                 description: (() => {
                   if (appointment.recurring && appointment.recurring.length > 0) {
-                    const mainSessionDate = new Date(appointment.date).toLocaleDateString('en-US', { 
-                      weekday: 'long', 
-                      month: 'short', 
-                      day: 'numeric',
-                      year: 'numeric'
-                    });
-                    const mainSessionTime = new Date(appointment.date).toLocaleTimeString('en-US', { 
-                      hour: 'numeric', 
-                      minute: '2-digit',
-                      hour12: true 
-                    });
+                    const mainSessionDate = formatDate(new Date(appointment.date));
+                    const mainSessionTime = formatTime(new Date(appointment.date));
                     
                     let description = `Session 1: ${mainSessionDate} at ${mainSessionTime}`;
                     
                     appointment.recurring.forEach((session: any, index: number) => {
-                      const sessionDate = new Date(session.date).toLocaleDateString('en-US', { 
-                        weekday: 'long', 
-                        month: 'short', 
-                        day: 'numeric',
-                        year: 'numeric'
-                      });
-                      const sessionTime = new Date(session.date).toLocaleTimeString('en-US', { 
-                        hour: 'numeric', 
-                        minute: '2-digit',
-                        hour12: true 
-                      });
+                      const sessionDate = formatDate(new Date(session.date));
+                      const sessionTime = formatTime(new Date(session.date));
                       description += `\nSession ${index + 2}: ${sessionDate} at ${sessionTime}`;
                     });
                     
@@ -291,7 +412,7 @@ export async function POST(req: Request) {
                   }
                 })(),
               },
-              unit_amount: Math.round(plan.price * 100)
+              unit_amount: Math.round(appointment.price * 100)
             },
             quantity: 1
           }],
@@ -350,9 +471,20 @@ export async function POST(req: Request) {
       // Only mark payment as pending and store session; do not change acceptance
       console.log('app/api/appointments/payment/route.ts - Updating appointment with checkout session ID');
       
-      // Check if this is a rebook session - preserve confirmed status
+      // Check if this is a balance payment - don't change status
+      const isBalancePayment = appointment.payment?.method === 'balance' || appointment.isBalance;
+      if (isBalancePayment) {
+        console.log('app/api/appointments/payment/route.ts - Skipping status change for balance payment');
+        return NextResponse.json({ 
+          success: true, 
+          message: "Balance payment - no status change needed",
+          appointmentId: appointmentId
+        });
+      }
+      
+      // Check if this is a rebook session - set to confirmed for paid rebooking
       const isRebookSession = appointment.plan === 'Purchased From Rebooking' || appointment.plan === 'Single Online Therapy Session';
-      const statusToSet = isRebookSession && appointment.status === 'confirmed' ? 'confirmed' : 'pending_match';
+      const statusToSet = isRebookSession ? 'confirmed' : 'pending_match';
       
       console.log('app/api/appointments/payment/route.ts - Status logic:', {
         isRebookSession,
@@ -391,6 +523,32 @@ export async function POST(req: Request) {
       totalSessions: appointment.totalSessions,
       date: appointment.date
     });
+    console.log('app/api/appointments/payment/route.ts - DEBUGGING: Legacy Stripe checkout product data will be:', {
+      name: appointment.recurring && appointment.recurring.length > 0 
+        ? `Recurring Therapy Sessions - ${appointment.sessionCount || (appointment.recurring.length + 1)} Sessions Package`
+        : `Therapy Appointment - ${appointment.plan}`,
+      description: (() => {
+        if (appointment.recurring && appointment.recurring.length > 0) {
+          const sessionCount = appointment.sessionCount || (appointment.recurring.length + 1);
+          const mainSessionDate = formatDate(new Date(appointment.date));
+          const mainSessionTime = formatTime(new Date(appointment.date));
+          
+          let description = `Session 1: ${mainSessionDate} at ${mainSessionTime}`;
+          
+          appointment.recurring.forEach((session: any, index: number) => {
+            const sessionDate = formatDate(new Date(session.date));
+            const sessionTime = formatTime(new Date(session.date));
+            description += `\nSession ${index + 2}: ${sessionDate} at ${sessionTime}`;
+          });
+          
+          return description;
+        } else {
+          return `Session with your therapist on ${formatDate(new Date(appointment.date))} at ${formatTime(new Date(appointment.date))}`;
+        }
+      })(),
+      unitAmount: Math.round(appointment.price * 100),
+      appointmentPrice: appointment.price
+    });
     
     // Calculate session count for success URL
     const sessionCount = appointment.sessionCount || appointment.totalSessions || 
@@ -414,47 +572,20 @@ export async function POST(req: Request) {
             description: (() => {
               if (appointment.recurring && appointment.recurring.length > 0) {
                 const sessionCount = appointment.sessionCount || (appointment.recurring.length + 1);
-                const mainSessionDate = new Date(appointment.date).toLocaleDateString('en-US', { 
-                  weekday: 'long', 
-                  month: 'short', 
-                  day: 'numeric',
-                  year: 'numeric'
-                });
-                const mainSessionTime = new Date(appointment.date).toLocaleTimeString('en-US', { 
-                  hour: 'numeric', 
-                  minute: '2-digit',
-                  hour12: true 
-                });
+                const mainSessionDate = formatDate(new Date(appointment.date));
+                const mainSessionTime = formatTime(new Date(appointment.date));
                 
                 let description = `Session 1: ${mainSessionDate} at ${mainSessionTime}`;
                 
                 appointment.recurring.forEach((session: any, index: number) => {
-                  const sessionDate = new Date(session.date).toLocaleDateString('en-US', { 
-                    weekday: 'long', 
-                    month: 'short', 
-                    day: 'numeric',
-                    year: 'numeric'
-                  });
-                  const sessionTime = new Date(session.date).toLocaleTimeString('en-US', { 
-                    hour: 'numeric', 
-                    minute: '2-digit',
-                    hour12: true 
-                  });
+                  const sessionDate = formatDate(new Date(session.date));
+                  const sessionTime = formatTime(new Date(session.date));
                   description += `\nSession ${index + 2}: ${sessionDate} at ${sessionTime}`;
                 });
                 
                 return description;
               } else {
-                return `Session with your therapist on ${new Date(appointment.date).toLocaleDateString('en-US', { 
-                  weekday: 'long', 
-                  month: 'short', 
-                  day: 'numeric',
-                  year: 'numeric'
-                })} at ${new Date(appointment.date).toLocaleTimeString('en-US', { 
-                  hour: 'numeric', 
-                  minute: '2-digit',
-                  hour12: true 
-                })}`;
+                return `Session with your therapist on ${formatDate(new Date(appointment.date))} at ${formatTime(new Date(appointment.date))}`;
               }
             })(),
           },
@@ -492,9 +623,9 @@ export async function POST(req: Request) {
 
     console.log('app/api/appointments/payment/route.ts - Updating appointment with checkout session ID');
     
-    // Check if this is a rebook session - preserve confirmed status
+    // Check if this is a rebook session - set to confirmed for paid rebooking
     const isRebookSession = appointment.plan === 'Purchased From Rebooking' || appointment.plan === 'Single Online Therapy Session';
-    const statusToSet = isRebookSession && appointment.status === 'confirmed' ? 'confirmed' : 'pending';
+    const statusToSet = isRebookSession ? 'confirmed' : 'pending';
     
     console.log('app/api/appointments/payment/route.ts - Status logic:', {
       isRebookSession,

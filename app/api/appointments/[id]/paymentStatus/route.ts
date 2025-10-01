@@ -52,21 +52,35 @@ export async function PUT(
 
       return NextResponse.json(updatedAppointment);
     } else if (paymentStatus === "completed") {
-      // Payment completed - transition to pending_match
+      // Payment completed - check if this is a rescheduled appointment
       appointment.isStripeVerified = true;
       
       const actor = { id: 'system', role: 'admin' as const };
       
+      // For rescheduled appointments, keep them as RESCHEDULED or CONFIRMED
+      // Only new appointments should go to PENDING_MATCH
+      let targetStatus = APPOINTMENT_STATUSES.PENDING_MATCH;
+      
+      if (appointment.isSameDayReschedule || appointment.isRescheduled) {
+        // This is a rescheduled appointment - keep it as RESCHEDULED or CONFIRMED
+        targetStatus = APPOINTMENT_STATUSES.RESCHEDULED;
+      } else if (appointment.status === APPOINTMENT_STATUSES.CONFIRMED || 
+                 appointment.status === APPOINTMENT_STATUSES.RESCHEDULED) {
+        // Already confirmed/rescheduled - keep current status
+        targetStatus = appointment.status as any;
+      }
+      
       const updatedAppointment = await updateAppointmentStatus(
         params.id,
-        APPOINTMENT_STATUSES.PENDING_MATCH,
+        targetStatus,
         actor,
         { 
-          reason: 'Payment completed - proceeding to therapist matching',
+          reason: `Payment completed - ${appointment.isSameDayReschedule ? 'reschedule payment' : 'proceeding to therapist matching'}`,
           meta: { 
             paymentStatus,
             isStripeVerified: true,
-            originalStatus: appointment.status
+            originalStatus: appointment.status,
+            isRescheduled: appointment.isSameDayReschedule || appointment.isRescheduled
           }
         }
       );
