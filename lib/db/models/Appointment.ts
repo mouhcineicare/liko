@@ -15,7 +15,11 @@ export interface IAppointment extends Document {
     | "cancelled" // Cancelled by therapist or patient
     | "completed" // All sessions completed
     | "no-show" // Patient didn't show up
-    | "rescheduled" // Appointment was rescheduled;
+    | "rescheduled"; // Appointment was rescheduled
+  
+  // DEPRECATED: Use StatusService.getCurrentStatus() instead
+  customStatus?: string; // Will be removed in next version
+  appointmentStatus?: string; // Will be removed in next version
   paymentStatus: 'pending' | 'completed' | 'failed' | 'refunded';
   paymentIntentId?: string;
   price: number;

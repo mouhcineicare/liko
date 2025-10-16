@@ -4,6 +4,8 @@ import Appointment from "@/lib/db/models/Appointment";
 import User from "@/lib/db/models/User";
 import { updateAppointmentStatus } from "@/lib/services/appointments/legacy-wrapper";
 import { APPOINTMENT_STATUSES } from "@/lib/utils/statusMapping";
+import { StatusValidator } from "@/lib/middleware/statusValidation";
+import { StatusService } from "@/lib/services/status/StatusService";
 
 export async function PUT(
   req: Request,
@@ -43,6 +45,16 @@ export async function PUT(
         newStatus = APPOINTMENT_STATUSES.CONFIRMED;
       }
 
+      // Validate status transition
+      const validationErrors = StatusValidator.validateTransition(appointment, newStatus);
+      if (validationErrors.length > 0) {
+        return NextResponse.json({ 
+          error: 'Invalid status transition', 
+          details: validationErrors.map(e => e.message).join(', '),
+          validationErrors
+        }, { status: 400 });
+      }
+
       // Determine actor (default to admin for this route)
       const actor = { id: 'system', role: 'admin' as const };
 
@@ -56,7 +68,8 @@ export async function PUT(
           meta: { 
             originalStatus: status,
             declineComment,
-            paymentStatus 
+            paymentStatus,
+            route: 'admin-status-update'
           }
         }
       );
