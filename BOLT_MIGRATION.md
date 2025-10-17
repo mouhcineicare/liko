@@ -9,10 +9,11 @@
 
 ## Quick Start in Bolt
 1. Pull latest code
-2. Run `yarn install`
-3. Run `yarn db:seed` (creates admin user)
-4. Run `yarn dev`
-5. Login: admin@gmail.com / 12345qwert
+2. Run `npm install`
+3. Run `cp .env.example .env.local` (creates environment file)
+4. Run `npm run db:seed` (creates admin user)
+5. Run `npm run dev`
+6. Login: admin@gmail.com / 12345qwert
 
 ## What Works
 - App builds and runs
