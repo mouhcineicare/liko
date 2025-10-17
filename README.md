@@ -6,10 +6,12 @@ See [BOLT_MIGRATION.md](./BOLT_MIGRATION.md) for details.
 
 **Quick Start**: 
 ```bash
-npm install
+npm install --legacy-peer-deps
 cp .env.example .env.local
 npm run dev
 ```
+
+**⚠️ If npm install gets stuck**: See [BOLT_SETUP_GUIDE.md](./BOLT_SETUP_GUIDE.md) for troubleshooting
 
 **Admin Login**: admin@gmail.com / 12345qwert
 
@@ -31,10 +33,12 @@ npm run dev
 
 ## Development
 ```bash
-npm install
+npm install --legacy-peer-deps
 cp .env.example .env.local
 npm run dev
 ```
+
+**⚠️ Troubleshooting**: If you encounter issues, see [BOLT_SETUP_GUIDE.md](./BOLT_SETUP_GUIDE.md)
 
 ## Environment Variables
 Copy `.env.example` to `.env.local` and configure your environment variables. The `.env.example` file contains all the necessary Supabase credentials for Bolt preview.
