@@ -1,3 +1,6 @@
+// TODO: Migrate to Supabase - Currently using MongoDB
+console.warn('Route not yet migrated to Supabase');
+
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth/config";
@@ -8,6 +11,9 @@ import stripe from '@/lib/stripe';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
+  // TODO: Migrate to Supabase - Currently using MongoDB
+  return NextResponse.json({ error: "Route not yet migrated to Supabase" }, { status: 501 });
+  
   try {
     const session = await getServerSession(authOptions);
     if (!session || session.user.role !== "admin") {

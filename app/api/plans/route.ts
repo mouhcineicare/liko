@@ -1,3 +1,6 @@
+// TODO: Migrate to Supabase - Currently using MongoDB
+console.warn('Route not yet migrated to Supabase');
+
 import { NextResponse } from "next/server";
 import connectDB from "@/lib/db/connect";
 import Plan from "@/lib/db/models/Plan";
@@ -5,6 +8,9 @@ import Plan from "@/lib/db/models/Plan";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  // TODO: Migrate to Supabase - Currently using MongoDB
+  return NextResponse.json({ error: "Route not yet migrated to Supabase" }, { status: 501 });
+  
   try {
     await connectDB();
     const plans = await Plan.find().sort({ createdAt: -1 });

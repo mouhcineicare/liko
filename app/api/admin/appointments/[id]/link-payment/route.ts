@@ -1,3 +1,6 @@
+// TODO: Migrate to Supabase - Currently using MongoDB
+console.warn('Route not yet migrated to Supabase');
+
 import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import dbConnect from '@/lib/db/connect'
@@ -8,6 +11,9 @@ import { verifyStripePaymentId } from '@/lib/stripe/verify-stripe-payment'
 export const dynamic = 'force-dynamic'
 
 export async function PUT(req: Request, { params }: { params: { id: string } }) {
+  // TODO: Migrate to Supabase - Currently using MongoDB
+  return NextResponse.json({ error: "Route not yet migrated to Supabase" }, { status: 501 });
+  
   try {
     await dbConnect()
     const session = await getServerSession(authOptions)
