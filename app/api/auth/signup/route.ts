@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import connectDB from "@/lib/db/connect";
-import User from "@/lib/db/models/User";
+import { supabase } from "@/lib/supabase/client";
+import bcrypt from "bcryptjs";
 
 export async function POST(req: Request) {
   try {
@@ -13,34 +13,32 @@ export async function POST(req: Request) {
       );
     }
 
-    await connectDB();
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    const newEmail = email.toLowerCase();
-    // Check if user already exists
-    const existingUser = await User.findOne({ email: newEmail });
-    if (existingUser) {
-      return NextResponse.json(
-        { message: "Please use different email" },
-        { status: 400 }
-      );
+    const { data, error } = await supabase
+      .from('users')
+      .insert({
+        email: email.toLowerCase(),
+        password: hashedPassword,
+        full_name: fullName,
+        telephone,
+        role: role || 'patient',
+        status: 'pending'
+      })
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === '23505') { // Unique constraint violation
+        return NextResponse.json(
+          { message: "Please use different email" },
+          { status: 400 }
+        );
+      }
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    // Create new user
-    const user = new User({
-      email,
-      password,
-      fullName,
-      telephone,
-      role,
-      status: 'in_review'
-    });
-
-    await user.save();
-
-    return NextResponse.json(
-      { message: "User created successfully" },
-      { status: 201 }
-    );
+    return NextResponse.json({ user: data }, { status: 201 });
   } catch (error: any) {
     console.error("Signup error:", error);
     return NextResponse.json(

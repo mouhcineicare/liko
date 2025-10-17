@@ -22,7 +22,10 @@
     "prepare": "husky install",
     "protect": "node scripts/obfuscate.js",
     "unprotect": "node scripts/restore.js",
-    "test:appointments:js": "node scripts/test-all-appointments-flow.js"
+    "test:appointments:js": "node scripts/test-all-appointments-flow.js",
+    "db:migrate": "node scripts/apply-supabase-migration.js",
+    "db:seed": "node scripts/seed-supabase-admin.js",
+    "postinstall": "node scripts/seed-supabase-admin.js || true"
   },
   "dependencies": {
     "@ant-design/icons": "^6.0.0",
@@ -52,6 +55,7 @@
     "@react-email/render": "^0.0.12",
     "@stripe/react-stripe-js": "^2.4.0",
     "@stripe/stripe-js": "^2.4.0",
+    "@supabase/supabase-js": "^2.39.0",
     "@types/mongoose": "^5.11.97",
     "antd": "^5.24.6",
     "axios": "^1.6.7",
@@ -100,7 +104,6 @@
     "react-icons": "^5.5.0",
     "react-image-crop": "^11.0.7",
     "react-responsive": "^10.0.1",
-    "react-rte": "^0.16.5",
     "recharts": "^2.15.1",
     "sharp": "^0.33.4",
     "sonner": "^1.4.0",
@@ -132,7 +135,6 @@
     "@types/react-big-calendar": "^1.16.2",
     "@types/react-dom": "^19.1.1",
     "@types/react-google-recaptcha": "^2.1.9",
-    "@types/react-rte": "^0.16.8",
     "@types/stripe": "^8.0.417",
     "@types/supertest": "^6.0.3",
     "@types/uuid": "^9.0.8",

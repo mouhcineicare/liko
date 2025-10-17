@@ -1,8 +1,7 @@
 import { NextAuthOptions, Session, User } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from 'bcryptjs';
-import UserModel from "@/lib/db/models/User";
-import connectDB from "@/lib/db/connect";
+import { supabase } from "@/lib/supabase/client";
 import { JWT } from "next-auth/jwt";
 import { RequestInternal } from "next-auth";
 
@@ -53,77 +52,85 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials: Record<"email" | "password" | "code" | "impersonated" | "adminId" | "userId", string> | undefined, req: Pick<RequestInternal, "body" | "query" | "headers" | "method">): Promise<ExtendedUser | null> {
         try {
-          await connectDB();
-
           if (!credentials) return null;
 
           // Impersonation flow
           if (credentials.impersonated === "true" && credentials.userId && credentials.adminId) {
-            const admin = await UserModel.findById(credentials.adminId);
-            if (!admin || admin.role !== 'admin') throw new Error('Admin not found');
+            const { data: admin, error: adminError } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', credentials.adminId)
+              .eq('role', 'admin')
+              .single();
 
-            const targetUser = await UserModel.findOne({
-              _id: credentials.userId,
-              status: 'active'
-            }).select('+image');
+            if (adminError || !admin) throw new Error('Admin not found');
+
+            const { data: targetUser, error: userError } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', credentials.userId)
+              .eq('status', 'active')
+              .single();
             
-            if (!targetUser) throw new Error('Target user not found or not active');
+            if (userError || !targetUser) throw new Error('Target user not found or not active');
 
             return {
-              id: targetUser._id.toString(),
+              id: targetUser.id,
               email: targetUser.email,
-              name: targetUser.fullName,
-              image: targetUser.image || null,
+              name: targetUser.full_name,
+              image: targetUser.avatar || null,
               adminEmail: admin.email,
-              originalUserId: targetUser._id.toString(),
+              originalUserId: targetUser.id,
               role: targetUser.role,
               status: targetUser.status,
-              isCalendarConnected: targetUser.isCalendarConnected,
-              therapyId: targetUser.therapy?.toString() || null,
-              timeZone: targetUser.timeZone,
+              isCalendarConnected: false, // TODO: Add calendar connection field
+              therapyId: null, // TODO: Add therapy relationship
+              timeZone: null,
               impersonated: true,
-              adminId: admin._id.toString(),
+              adminId: admin.id,
             };
           }
 
           // Regular authentication flow
           if (!credentials.email) return null;
 
-          const user = await UserModel.findOne({ email: credentials.email.toLowerCase() })
-                              .select('+image +password +emailVerificationCode +emailVerificationCodeExpires');
+          const { data: user, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('email', credentials.email.toLowerCase())
+            .single();
           
-          if (!user) return null;
+          if (error || !user) return null;
 
           // Email verification code flow
           if (credentials.code) {
-            if (!user.emailVerificationCode) return null;
+            if (!user.verification_token) return null;
             
-            const isValid = await bcrypt.compare(credentials.code, user.emailVerificationCode);
+            const isValid = await bcrypt.compare(credentials.code, user.verification_token);
             if (!isValid) return null;
 
-            if (user.emailVerificationCodeExpires && user.emailVerificationCodeExpires < new Date()) {
-              throw new Error("Verification code has expired");
-            }
-
-            await UserModel.findByIdAndUpdate(user._id, {
-              emailVerificationCode: null,
-              emailVerificationCodeExpires: null,
-              emailVerificationAttempts: 0,
-            });
+            // Update user to mark as verified
+            await supabase
+              .from('users')
+              .update({ 
+                email_verified: true,
+                verification_token: null 
+              })
+              .eq('id', user.id);
 
             return {
               adminId: "",
               adminEmail: "",
-              originalUserId: user._id.toString(),
-              id: user._id.toString(),
+              originalUserId: user.id,
+              id: user.id,
               email: user.email,
-              name: user.fullName,
-              image: user.image || null,
+              name: user.full_name,
+              image: user.avatar || null,
               role: user.role,
               status: user.status,
-              isCalendarConnected: user.isCalendarConnected,
-              therapyId: user.therapy?.toString() || null,
-              timeZone: user.timeZone,
+              isCalendarConnected: false,
+              therapyId: null,
+              timeZone: null,
             };
           }
 
@@ -141,16 +148,16 @@ export const authOptions: NextAuthOptions = {
           return {
             adminId: "",
             adminEmail: "",
-            originalUserId: user._id.toString(),
-            id: user._id.toString(),
+            originalUserId: user.id,
+            id: user.id,
             email: user.email,
-            name: user.fullName,
-            image: user.image || null,
+            name: user.full_name,
+            image: user.avatar || null,
             role: user.role,
             status: user.status,
-            isCalendarConnected: user.isCalendarConnected,
-            therapyId: user.therapy?.toString() || null,
-            timeZone: user.timeZone,
+            isCalendarConnected: false,
+            therapyId: null,
+            timeZone: null,
           };
         } catch (error) {
           console.error("Auth error in authorize:", error);
